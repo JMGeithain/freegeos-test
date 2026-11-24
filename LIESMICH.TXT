@@ -1,0 +1,133 @@
+FreeGEOS Test 1.1 - Systeminformation und SDK-Vorfuehrung
+=========================================================
+FreeGEOS-Ausgabe von "GeoWorks 1.x Test" (GWTEST.GEO)
+fuer FreeGEOS / PC/GEOS 2.x und neuer, geschrieben in GOC/C
+
+INHALT
+  fertig\           gtsfree.geo (normal) und gtsfreeec.geo (mit Fehlerpruefung)
+                    -> nach WORLD kopieren; gebaut gegen FreeGEOS CI-latest
+                    (Nov. 2026, Kernel-Protokoll 654, UI 743)
+  GTSFree\          Projektordner fuer das FreeGEOS-SDK (flach, ohne
+                    Unterordner, damit mkmf keine "Module" sieht)
+    gtsfree.goc     Quelltext im GEOS-Zeichensatz (Mac Roman, Umlaute)
+    gtsfree.gp      Geode-Parameter (Kennung GTSF, Hersteller-ID 16506)
+    gtsicon.goh     Programmsymbole aus GTS1ICON.PCX:
+                      GTLargeIconMoniker  48x30 (large, icon)
+                      GTSmallIconMoniker  32x20 (tiny, icon)
+                      GTMiniIconMoniker   15x15 (tiny, tool) - Mini-Icon,
+                                          vorlaeufig, im Icon-Editor ersetzen
+    gtsicon.h       dasselbe Symbol als Bitmap fuer GrDrawBitmap
+    gtsaboutlogo.goh  JME-Spirallogo 72x72 fuer das Info-Fenster
+                    (aus GeoMoorhuhn lite, MOORGEOS)
+  quelle-utf8\      derselbe Quelltext in UTF-8 zum Lesen/Bearbeiten
+  tools\            pcx2goc.py (PCX -> Moniker), to_geos.sh (UTF-8 -> GEOS)
+  icon\             GTS1ICON.PCX
+  hilfe\            HILFE-VORSCHLAG.TXT (UTF-8) und HILFE850.TXT (DOS-Codepage
+                    850, zum Einlesen in FreeGEOS): Vorschlag fuer den Inhalt
+                    der Hilfedatei "FGTest Hilfe" mit allen Kontextnamen
+
+BAUEN (FreeGEOS-SDK, wie in der README von bluewaysw/pcgeos)
+  1. GTSFree nach %LOCAL_ROOT%\Appl\GTSFree kopieren
+  2. cd %LOCAL_ROOT%\Appl\GTSFree
+  3. mkmf
+  4. pmake            (EC-Fassung: pmake gtsfreeec.geo)
+  5. gtsfree.geo nach WORLD der FreeGEOS-Installation kopieren
+     (oder mit "pcs" in die laufende Zielumgebung schicken)
+
+SEITEN (Reiter, Tasten 1-9 und 0, Menue "Seite")
+  1 Uebersicht   Rechner/Emulator, Prozessor, Speicher, Grafik, Versionen
+  2 System       CPU (auch CPUID), Koprozessor, BIOS-Kennung, Emulator,
+                 BIOS-Datum, Modell-Byte, Laufwerke, COM/LPT, Tastatur,
+                 DOS-Version, Speicherplatz, Windows, COMSPEC, BLASTER
+  3 Speicher     INT 12h, CMOS, INT 15h/88h, XMS, EMS,
+                 GEOS-Speicherverwaltung (Heap, Handles, Geodes, Swap)
+  4 Bildschirm   GEOS-Treiber, Farbmodus, Videomodus, VESA-BIOS (OEM,
+                 Hersteller, Videospeicher), Aufloesung, Farbtiefe, Fenster
+  5 GEOS         Kernel/UI-Version und Protokoll, Verzeichnis, SPUI,
+                 Schrift, Hintergrund, Autostart, Tastatur, Maus, Drucker
+  6 Leistung     Schleifen/s, Geschwindigkeitsindex (PC/XT = 1,0),
+                 Gleitkomma-Operationen/s (Math-Bibliothek);
+                 Knopf "Jetzt messen" / Taste M: Rechtecke, Texte,
+                 Ellipsen, Bitmaps pro Sekunde, MemAlloc, Datei schr./lesen
+  7 Grafik       16 Farben, RGB-Verlaeufe, Formen, Linien, Fuellmuster,
+                 Schriften und Stile, gedrehter Text, Bitmaps 1/4/24 Bit
+  8 Eingabe      Tastencodes (CX, DL/DH), Mausposition, Klicks, Tasten
+                 (BP), END/DRAG-Zaehler, Mausrad; Malflaeche mit Mausgriff
+  9 Schriften    alle installierten Schriften (GrEnumFonts) mit Name,
+                 DOS-Dateiname (z. B. LED.FNT), ID, Umriss bzw. Bitmap mit
+                 den vorhandenen Groessen und einem Muster mit Umlauten,
+                 ss und Euro-Zeichen in der Schrift selbst; TrueType-
+                 Schriften aus FONT\TTF (Datei zugeordnet ueber den
+                 Familiennamen in der TTF-Namenstabelle), nicht geladene
+                 TTF-Dateien am Ende der Liste
+  0 Klang        Sound-Bibliothek: Ton A, Tonleiter, "Alle meine Entchen",
+                 Akkord mit 3 Stimmen; Instrument Klavier/Orgel/Floete/
+                 Xylophon; Treiber aus GEOS.INI [sound], BLASTER
+
+MENUE DATEI
+  Bericht speichern          -> DOCUMENT\FGTEST.TXT (DOS-Zeichensatz)
+  In Zwischenablage kopieren -> zum Einfuegen in GeoWrite (Tab vor Werten)
+  Drucken...                 -> FreeGEOS-Druckdialog, ganzer Bericht (A4)
+  Neu messen
+  Info ueber FreeGEOS Test   -> Info-Fenster wie in GeoMoorhuhn lite:
+                                Name, Version, JME-Logo, Copyright, OK
+  dazu Menue Seite (1-8); die Hilfe oeffnet das ? in der Titelleiste
+
+FENSTER
+  Startet maximiert und passt sich dem Desktop an: die Seite (entworfen
+  fuer 640 x 460) wird auf die Fenstergroesse skaliert, die Schrift waechst
+  mit. Bei jeder Groessenaenderung wird neu gezeichnet.
+  Kleiner als 640 x 460 wird die Seite nicht (sonst ueberlappt die Schrift);
+  ist das Fenster kleiner, erscheinen Rollbalken.
+  Bildschirmschrift: Esquire (ID 555) bis zur 1,4-fachen Vergroesserung,
+  darueber automatisch URW Sans (Esquire gibt es nur bis 18 Punkt).
+
+HILFE (echte FreeGEOS-Hilfe, in GeoWrite schreiben)
+  Name der Hilfedatei:   FGTest Hilfe
+  Ablage:                USERDATA\HELP\
+  Kontexte (Namen der Hilfe-Kontexte im Dokument):
+    TOC          Inhaltsverzeichnis  (? in der Titelleiste)
+    Uebersicht, System, Speicher, Bildschirm, GEOS,
+    Leistung, Grafik, Eingabe, Schriften, Klang
+                 Hilfe zur jeweiligen Seite (Taste H, ? oder F1)
+
+ZAHLEN UND DATUM
+  Tausender- und Dezimaltrennzeichen sowie Datum/Uhrzeit kommen aus den
+  FreeGEOS-Voreinstellungen (LocalGetNumericFormat, LocalFormatDateTime).
+
+UEBERSETZEN (ResEdit)
+  Alle sichtbaren Texte stehen in der Ressource StringsUI (Chunks Str...),
+  die Menue- und Objekttexte (auch das Info-Fenster GTAbout...) in den
+  Ressourcen AppResource und Interface.
+
+TASTEN
+  1-9, 0 Seite  N/Leertaste/P blaettern  Pfeile, +/-, Bild auf/ab,
+  Mausrad rollen
+  M messen  S speichern  K kopieren  H/?/F1 Hilfe  I Info  Esc Uebersicht
+  (Auf der Seite Eingabe wird jede Taste angezeigt.)
+
+UNTERSCHIEDE ZUR GEOWORKS-1-FASSUNG
+  - Normale FreeGEOS-UI: GenPrimary mit Menues, PrintControl, GenView.
+    Die Seite selbst ist wie im Original eine eigene Vis-Klasse
+    (GTPageClass) mit Mausgriff (MSG_VIS_GRAB_MOUSE/RELEASE_MOUSE) -
+    die Tricks aus SDK-VIS-KLASSE.md braucht es hier nicht.
+  - DOS-Aufrufe zwischen SysLockBIOS/SysUnlockBIOS statt Kernel 95.
+  - CPUID/486-Test als Maschinencode ueber "#pragma aux" (Watcom).
+  - Speicherplatz, Version, Geodes, Handles ueber die GEOS-API.
+  - Temporaere Messdatei: STATE\FGTEST.TMP (wird danach geloescht).
+
+HINWEIS ZUM BAUEN
+  Uebersetzt mit goc/glue aus bluewaysw/pcgeos und Open Watcom 2.0
+  (Snapshot 2020-12-01): 0 Fehler, 0 Warnungen. glue meldet nur, dass
+  der feste Speicher (dgroup, vor allem Texte) kleiner sein koennte.
+  Das fertige SDK-Paket "pcgeos-sdk.zip" enthaelt CInclude\Internal
+  nicht; dann den Ordner aus dem Repository ergaenzen (spool.goh
+  braucht Internal\spoolInt.h).
+
+Lizenz: MIT
+
+VERSIONEN
+  1.0  erste FreeGEOS-Fassung
+  1.1  Seiten Schriften und Klang, Mausrad, Gleitkomma-Messung,
+       Systemformate, Info-Fenster mit JME-Logo, Rollbalken,
+       Hilfedatei "FGTest Hilfe"

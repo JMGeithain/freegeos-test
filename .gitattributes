@@ -1,0 +1,6 @@
+# GEOS-Zeichensatz (Mac Roman) und DOS-Dateien unveraendert lassen
+GTSFree/* -text
+hilfe/HILFE850.TXT -text
+LIESMICH.TXT -text
+*.geo binary
+*.PCX binary

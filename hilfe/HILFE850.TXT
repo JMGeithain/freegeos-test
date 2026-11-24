@@ -1,0 +1,431 @@
+FreeGEOS Test 1.1 - Vorschlag fÅr die Hilfe
+=============================================
+
+So ist dieser Vorschlag aufgebaut
+---------------------------------
+Name der Hilfedatei:  FGTest Hilfe
+Ablage:               USERDATA\HELP\
+
+Jeder Abschnitt unten beginnt mit einer Zeile
+
+    ### KONTEXT: <Name>
+
+Dieser Name muss in GeoWrite als Kontextname der Seite eingetragen
+werden. Das Programm ruft genau diese Namen auf:
+
+    TOC          Inhaltsverzeichnis (Fragezeichen in der Titelleiste)
+    Uebersicht   Taste H, ? oder F1 auf Seite 1
+    System       ... auf Seite 2
+    Speicher     ... auf Seite 3
+    Bildschirm   ... auf Seite 4
+    GEOS         ... auf Seite 5
+    Leistung     ... auf Seite 6
+    Grafik       ... auf Seite 7
+    Eingabe      ... auf Seite 8
+    Schriften    ... auf Seite 9
+    Klang        ... auf Seite 0
+
+ZusÑtzliche Kontexte, die nur Åber Verweise erreicht werden:
+
+    Bedienung    Tasten, Maus, MenÅs
+    Bericht      Speichern, Kopieren, Drucken
+    Begriffe     kurze ErklÑrungen der Fachwîrter
+
+Wîrter in [eckigen Klammern] sind als Verweis (Hyperlink) auf den
+genannten Kontext gedacht, z. B. [System] -> Kontext "System".
+Zeilen mit "=" darunter sind öberschriften.
+
+
+### KONTEXT: TOC
+
+FreeGEOS Test - Hilfe
+=====================
+
+FreeGEOS Test zeigt, auf welchem Rechner oder Emulator FreeGEOS lÑuft,
+und fÅhrt vor, was mit dem FreeGEOS-SDK mîglich ist: Grafik, Schriften,
+Klang, Maus, Tastatur, Drucken, Zwischenablage und mehr.
+
+Die Seiten des Programms
+  [öbersicht]   das Wichtigste auf einen Blick
+  [System]      Prozessor, BIOS, Emulator, Schnittstellen, DOS
+  [Speicher]    konventioneller, erweiterter, XMS- und EMS-Speicher
+  [Bildschirm]  Bildschirmtreiber, Grafikkarte, Auflîsung, Farben
+  [GEOS]        Version, Verzeichnis, OberflÑche, GerÑte
+  [Leistung]    Geschwindigkeitsmessung mit Animation
+  [Grafik]      Farben, Formen, Muster, Schriften, Bitmaps
+  [Eingabe]     Tastencodes, Maus, Mausrad, MalflÑche
+  [Schriften]   alle installierten Schriften mit Muster
+  [Klang]       Tîne, Tonleiter, Melodie und Akkord
+
+Weitere Themen
+  [Bedienung]   Tasten, Maus und MenÅs
+  [Bericht]     den Systembericht speichern, kopieren und drucken
+  [Begriffe]    kurze ErklÑrungen der Fachwîrter
+
+Info
+Im MenÅ Datei finden Sie "Info Åber FreeGEOS Test" mit Version und
+Copyright.
+
+
+### KONTEXT: Bedienung
+
+Bedienung
+=========
+
+Seiten wÑhlen
+  - Klicken Sie auf einen Reiter oben im Fenster, oder
+  - wÑhlen Sie die Seite im MenÅ Seite, oder
+  - drÅcken Sie eine Zifferntaste: 1 bis 9 fÅr die Seiten 1 bis 9,
+    0 fÅr die Seite Klang.
+  - N oder die Leertaste blÑttert zur nÑchsten Seite,
+    P zur vorigen Seite.
+  - Esc springt zurÅck zur [öbersicht].
+
+Rollen
+Passt eine Seite nicht ganz in das Fenster, rollen Sie mit
+  - den Pfeiltasten nach oben und unten,
+  - den Tasten + und -,
+  - Bild auf und Bild ab,
+  - dem Mausrad oder
+  - den blauen Pfeilen am rechten Rand.
+
+Weitere Tasten
+  M        Leistung neu messen (siehe [Leistung])
+  S        Bericht speichern (siehe [Bericht])
+  K        Bericht in die Zwischenablage kopieren
+  H, ?, F1 Hilfe zur aktuellen Seite
+  I        Info Åber FreeGEOS Test
+
+Auf der Seite [Eingabe] werden alle Tasten angezeigt statt ausgefÅhrt.
+Wechseln Sie dort die Seite mit der Maus oder Åber das MenÅ Seite.
+
+Fenstergrî·e
+Das Fenster startet maximiert. Der Inhalt wÑchst mit der Fenstergrî·e
+mit. Ist das Fenster kleiner als 640 x 460 Bildpunkte, erscheinen
+Rollbalken. Bei gro·en Fenstern wechselt die Schrift automatisch von
+Esquire auf eine Umrissschrift, damit sie scharf bleibt.
+
+
+### KONTEXT: Uebersicht
+
+öbersicht
+=========
+
+Die erste Seite fasst das Wichtigste zusammen:
+
+  Rechner           der erkannte Emulator (z. B. DOSBox, Basebox,
+                    86Box, QEMU) oder der Rechnertyp laut BIOS
+  Prozessor         Prozessorklasse, von 8086 bis Pentium 4 und neuer
+  Rechenkoprozessor ob ein mathematischer Koprozessor vorhanden ist
+  Geschwindigkeit   Index im Vergleich zum IBM PC/XT (= 1,0)
+  Arbeitsspeicher   konventioneller und erweiterter Speicher
+  Grafik            Auflîsung und Farbtiefe
+  FreeGEOS          Version des Systemkerns
+  DOS               DOS-Version und Hersteller
+  Datum und Uhrzeit im Format Ihrer FreeGEOS-Voreinstellungen
+
+Unter "Dieses Programm" steht die aktuelle Fenstergrî·e.
+
+Mehr Einzelheiten finden Sie auf den Seiten [System], [Speicher],
+[Bildschirm] und [GEOS].
+
+
+### KONTEXT: System
+
+System
+======
+
+Prozessor
+  Typ                  Prozessorklasse
+  Hersteller (CPUID)   z. B. GenuineIntel oder AuthenticAMD - nur bei
+                       Prozessoren mit dem Befehl CPUID (ab spÑter 486)
+  Familie/Modell/Stufe die genaue Kennung des Prozessors
+  Bezeichnung          der Klartextname, falls der Prozessor ihn liefert
+  Rechenkoprozessor    "integriert" bedeutet: im Prozessor eingebaut
+  Schleifen pro Sekunde  eigene kurze Messung beim Programmstart
+  Geschwindigkeitsindex  Messung des FreeGEOS-Kernels; ein IBM PC/XT
+                       mit 4,77 MHz hat den Wert 1,0
+
+BIOS und Emulator
+Emulatoren hinterlassen eine Kennung im BIOS. FreeGEOS Test sucht
+danach und zeigt die gefundene Zeile als BIOS-Kennung an. Dazu
+kommen das BIOS-Datum und das Modell-Byte (FCh = AT-kompatibel).
+
+Ausstattung
+Diskettenlaufwerke, Festplatten, serielle (COM) und parallele (LPT)
+Schnittstellen mit ihren Adressen sowie die Art der Tastatur.
+
+DOS
+DOS-Version und Hersteller, die "wahre" Version (bei MS-DOS 5 und
+neuer), das aktuelle Laufwerk, der freie Speicherplatz auf dem
+GEOS-Laufwerk, ob Windows lÑuft, sowie die Umgebungsvariablen
+COMSPEC (Kommandoprozessor) und BLASTER (Soundkarte).
+
+
+### KONTEXT: Speicher
+
+Speicher
+========
+
+Konventioneller Speicher
+Der Speicher unterhalb von 640 KB, gemeldet vom BIOS (INT 12h).
+
+Erweiterungsspeicher
+  Laut CMOS            was im CMOS-Speicher eingetragen ist
+  INT 15h, Funktion 88h  was das BIOS meldet; 0 KB bedeutet meist, dass
+                       ein XMS-Treiber den Speicher Åbernommen hat
+
+XMS und EMS
+Version und freier Speicher des XMS-Treibers (z. B. HIMEM.SYS) und
+des EMS-Treibers (z. B. EMM386), falls vorhanden.
+
+GEOS-Speicherverwaltung
+  Heap gesamt          Speicher, den FreeGEOS fÅr Programme verwaltet
+  Grî·ter freier Block der grî·te zusammenhÑngende freie Bereich
+  Handles              VerwaltungseintrÑge fÅr Speicherblîcke
+                       (gesamt und frei)
+  Geladene Geodes      Programme, Bibliotheken und Treiber
+  Auslagerung          Datei und Grî·e fÅr ausgelagerten Speicher
+                       laut GEOS.INI
+
+
+### KONTEXT: Bildschirm
+
+Bildschirm
+==========
+
+GEOS-Bildschirmtreiber
+GerÑt und Treiber aus der GEOS.INI, der Farbmodus (16 Farben, 256
+Farben oder Echtfarben) und die Bildschirmgrî·e, die FreeGEOS
+verwendet.
+
+Grafikkarte
+Der aktuelle Videomodus, Auflîsung und Farbtiefe. Ist ein VESA-BIOS
+vorhanden, zeigt das Programm dessen Version, den Hersteller der
+Grafikkarte, Anbieter und Produkt sowie die Grî·e des
+Videospeichers.
+
+Programmfenster
+Die Grî·e des Fensters von FreeGEOS Test in Bildpunkten.
+
+
+### KONTEXT: GEOS
+
+GEOS
+====
+
+Version
+Die Versionen des FreeGEOS-Kernels und der BenutzeroberflÑche mit
+ihrer Protokollnummer, au·erdem das Verzeichnis, in dem FreeGEOS
+installiert ist.
+
+OberflÑche
+Spezifische UI (z. B. motif.geo oder isui.geo), Systemschrift,
+Hintergrundbild und die Programme, die beim Start automatisch
+geladen werden.
+
+GerÑte
+Tastatur, Maus und Drucker, wie sie in der GEOS.INI eingetragen sind,
+und ob der Stift-Modus eingeschaltet ist.
+
+
+### KONTEXT: Leistung
+
+Leistung
+========
+
+Oben stehen die Werte des Prozessors: Schleifen pro Sekunde und der
+Geschwindigkeitsindex (IBM PC/XT = 1,0).
+
+Messen
+Klicken Sie auf den Knopf "Jetzt messen" oder drÅcken Sie M. Jede
+Messung dauert etwa eine halbe Sekunde, insgesamt einige Sekunden.
+Im Testfeld sehen Sie dabei, was gezeichnet wird.
+
+Gemessen werden
+  Gleitkomma           Rechnungen mit Kommazahlen pro Sekunde
+                       (Math-Bibliothek von FreeGEOS)
+  Rechtecke, Texte,    ZeichenvorgÑnge pro Sekunde mit dem
+  Ellipsen, Bitmaps    GEOS-Grafiksystem
+  Speicherblîcke       Anlegen und Freigeben von Speicher pro Sekunde
+  Datei schreiben/lesen  Tempo in KB pro Sekunde
+
+FÅr die Dateimessung legt das Programm kurz die Datei
+STATE\FGTEST.TMP an und lîscht sie danach wieder.
+
+Tipp: Vergleichen Sie die Werte mit verschiedenen Emulator-
+Einstellungen, z. B. der Zahl der Zyklen in DOSBox oder Basebox.
+
+
+### KONTEXT: Grafik
+
+Grafik
+======
+
+Diese Seite fÅhrt die Grafikbefehle von FreeGEOS vor:
+
+  16 Systemfarben     die Standardpalette
+  RGB-VerlÑufe        Rot, GrÅn, Blau und Grau in 64 Stufen;
+                      bei 16 oder 256 Farben werden sie gerastert
+  Formen              Rechtecke, abgerundete Rechtecke, Ellipsen,
+                      Kreisausschnitt, Stern, LinienstÑrken und
+                      gestrichelte und gepunktete Linien
+  FÅllmuster          die eingebauten Muster des Systems
+  Schriften und Stile fett, kursiv, unterstrichen, durchgestrichen,
+                      Umriss und verschiedene Grî·en
+  Gedrehter Text      Text in 45-Grad-Schritten
+  Bitmaps             Bilder mit 1 Bit, 4 Bit mit Maske und 24 Bit
+  Zeichensatz         Umlaute, ·, Euro-Zeichen und Sonderzeichen
+
+
+### KONTEXT: Eingabe
+
+Eingabe
+=======
+
+Tastatur
+Jede gedrÅckte Taste erscheint links in der Liste, die neueste oben.
+  Nr.       laufende Nummer
+  Zeichen   die Taste im Klartext, z. B. 'a', Esc, F1 oder Num *
+            (Ziffernblock)
+  CX        der Zeichencode, den FreeGEOS meldet
+  DL/DH     Zeichen-Flags und Umschalttasten
+
+Maus
+Rechts stehen die Position der Maus, die Zahl der Klicks, der letzte
+Klick, der Tastenzustand, wie oft losgelassen und gezogen wurde, und
+die Bewegungen des Mausrads.
+
+MalflÑche
+Zeichnen Sie mit gedrÅckter linker Maustaste. Die Linie folgt der
+Maus nur, solange die Taste gedrÅckt ist. Die Zeichnung bleibt
+erhalten, bis Sie das Programm beenden.
+
+Hinweis: Auf dieser Seite werden alle Tasten angezeigt statt
+ausgefÅhrt. Wechseln Sie die Seite mit der Maus oder Åber das MenÅ
+Seite.
+
+
+### KONTEXT: Schriften
+
+Schriften
+=========
+
+Die Liste zeigt alle Schriften, die FreeGEOS kennt:
+
+  Name      der Name der Schrift
+  Datei     die Schriftdatei im Ordner USERDATA\FONT, z. B. LED.FNT,
+            bei TrueType-Schriften TTF\NAME.TTF; "+2" bedeutet, dass
+            zwei weitere Dateien (z. B. fett und kursiv) dazugehîren
+  ID        die Kennnummer der Schrift, dezimal und hexadezimal
+  Art       Bitmap, Nimbus oder TrueType
+  Muster    eine Probe mit Umlauten, · und Euro-Zeichen in der
+            Schrift selbst
+
+Bitmap-Schriften
+Sie gibt es nur in bestimmten Grî·en; diese stehen in der Spalte Art,
+z. B. "Bitmap 9/10/12/14/18". Das Muster wird in der passenden
+vorhandenen Grî·e gezeigt.
+
+Umrissschriften (Nimbus und TrueType)
+Sie lassen sich in jeder Grî·e verwenden.
+
+TrueType-Schriften
+FreeGEOS lÑdt TrueType-Schriften Åber den TrueType-Treiber aus dem
+Ordner USERDATA\FONT\TTF. Oben steht, ob der Treiber geladen ist und
+wie viele TTF-Dateien gefunden wurden. Dateien, die FreeGEOS nicht
+als Schrift Åbernommen hat, stehen am Ende der Liste mit dem Vermerk
+"nicht geladen". Mîgliche GrÅnde: Der Treiber ist nicht aktiv, die
+Datei ist zu gro· oder zu alt, oder FreeGEOS wurde nach dem Kopieren
+der Datei noch nicht neu gestartet.
+
+Fehlt in einer Schrift das Euro-Zeichen, erscheint an seiner Stelle
+ein anderes Zeichen.
+
+
+### KONTEXT: Klang
+
+Klang
+=====
+
+FreeGEOS Test spielt KlÑnge Åber die Sound-Bibliothek von FreeGEOS.
+
+Oben stehen der Synthesizer- und der Sample-Treiber aus der GEOS.INI
+sowie die Umgebungsvariable BLASTER der Soundkarte.
+
+Abspielen
+  Ton A (440 Hz)        ein Ton von einer Sekunde
+  Tonleiter C-Dur       acht Tîne aufwÑrts
+  Alle meine Entchen    ein bekanntes Kinderlied
+  Akkord (3 Stimmen)    C, E und G gleichzeitig
+
+Instrument
+WÑhlen Sie Klavier, Orgel, Flîte oder Xylophon und spielen Sie dann
+erneut.
+
+Hinweis: Mit dem PC-Lautsprecher klingen alle Instrumente gleich, und
+ein Akkord wird nicht gleichzeitig gespielt. Erst mit einer
+Soundkarte und dem passenden Treiber sind Instrumente und Akkorde zu
+hîren. Erscheint eine Fehlermeldung, prÅfen Sie die Soundeinstellungen
+in den FreeGEOS-Voreinstellungen.
+
+
+### KONTEXT: Bericht
+
+Bericht
+=======
+
+Die Seiten 1 bis 6 bilden zusammen den Systembericht.
+
+Bericht speichern (MenÅ Datei oder Taste S)
+Schreibt den Bericht als reinen Text in die Datei DOCUMENT\FGTEST.TXT.
+Sie kînnen ihn mit jedem Texteditor îffnen, auch unter DOS oder
+Windows.
+
+In Zwischenablage kopieren (MenÅ Datei oder Taste K)
+Legt den Bericht in die Zwischenablage. In GeoWrite oder im
+Notizblock fÅgen Sie ihn mit Bearbeiten > EinfÅgen ein. Zwischen
+Bezeichnung und Wert steht ein Tabulator, so lÑsst sich der Text
+leicht als Tabelle ausrichten.
+
+Drucken (MenÅ Datei > Drucken)
+Druckt den ganzen Bericht auf A4 mit Seitenzahlen und Datum Åber den
+FreeGEOS-Druckdialog. Mit einem PDF-Druckertreiber entsteht so eine
+PDF-Datei.
+
+Neu messen (MenÅ Datei)
+Misst die [Leistung] neu; die Werte erscheinen danach auch im
+Bericht.
+
+
+### KONTEXT: Begriffe
+
+Begriffe
+========
+
+BIOS        Grundprogramm des Rechners; meldet Ausstattung und
+            Speicher
+CPUID       Befehl neuerer Prozessoren, der Hersteller und Typ angibt
+DOSBox, Basebox
+            Emulatoren, die einen DOS-PC nachbilden; FreeGEOS lÑuft
+            darin wie auf einem echten Rechner
+EMS         Expanded Memory, Zusatzspeicher Åber ein Fenster unterhalb
+            von 1 MB (z. B. EMM386)
+Geode       ein FreeGEOS-Programm, eine Bibliothek oder ein Treiber
+GEOS.INI    die Einstellungsdatei von FreeGEOS
+Handle      Verwaltungseintrag von FreeGEOS fÅr einen Speicherblock
+            oder eine Datei
+Heap        der Speicher, den FreeGEOS fÅr Programme verwaltet
+Bitmap-Schrift
+            Schrift aus fertigen Bildpunkten in festen Grî·en
+Umrissschrift
+            Schrift aus Umrissen, in jeder Grî·e scharf (Nimbus,
+            TrueType)
+Font-ID     Kennnummer einer Schrift in FreeGEOS; TrueType-Schriften
+            beginnen mit 5xxxh
+VESA        Standard fÅr Grafikkarten mit hîheren Auflîsungen und
+            mehr Farben
+XMS         Extended Memory, Speicher oberhalb von 1 MB
+            (z. B. HIMEM.SYS)
+Zwischenablage
+            Ablage zum Kopieren und EinfÅgen zwischen Programmen

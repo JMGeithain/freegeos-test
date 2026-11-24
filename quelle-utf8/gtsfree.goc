@@ -1,0 +1,3884 @@
+/***********************************************************************
+ *
+ *  PROJEKT:   FreeGEOS Test 1.1
+ *             FreeGEOS-Ausgabe von "GeoWorks 1.x Test" (GWTEST.GEO)
+ *  DATEI:     gtsfree.goc
+ *  LIZENZ:    MIT
+ *
+ *  Liest aus, auf welchem Rechner oder Emulator FreeGEOS laeuft, zeigt
+ *  es auf 8 Seiten an, speichert, kopiert und druckt den Bericht und
+ *  fuehrt vor, was mit dem FreeGEOS-SDK (GOC/C) moeglich ist.
+ *
+ *  Seiten wie im Original:
+ *    1 Uebersicht  2 System  3 Speicher  4 Bildschirm  5 GEOS
+ *    6 Leistung    7 Grafik  8 Eingabe   (+ Hilfe, Info)
+ *
+ *  Tasten wie im Original:
+ *    1-8 Seite, N/Leertaste/P blaettern, Pfeile oder +/- rollen,
+ *    M messen, S speichern, K kopieren, H/? Hilfe, I Info, Esc Uebersicht
+ *
+ *  Zeichensatz dieser Datei: GEOS (Mac Roman) wegen der Umlaute.
+ *  Die UTF-8-Fassung liegt in quelle-utf8/ (tools/to_geos.sh wandelt um).
+ *
+ ***********************************************************************/
+
+@include <stdapp.goh>
+
+@include <Objects/vTextC.goh>
+@include <Objects/helpCC.goh>
+#include <Ansi/stdio.h>
+#include <Ansi/string.h>
+#include <sysstats.h>
+#include <system.h>
+#include <geode.h>
+#include <timedate.h>
+#include <disk.h>
+#include <file.h>
+#include <initfile.h>
+#include <localize.h>
+#include <gstring.h>
+#include <font.h>
+#include <sound.h>
+
+/***********************************************************************
+ *              Konstanten
+ ***********************************************************************/
+
+#define APP_VERSION     "1.1"
+
+#define PAGE_W          640
+#define PAGE_H          460
+
+/* Seiten */
+#define PG_UEBERSICHT   0
+#define PG_SYSTEM       1
+#define PG_SPEICHER     2
+#define PG_BILDSCHIRM   3
+#define PG_GEOS         4
+#define PG_LEISTUNG     5
+#define PG_GRAFIK       6
+#define PG_EINGABE      7
+#define PG_SCHRIFTEN    8
+#define PG_KLANG        9
+
+/* Hilfedatei in USERDATA\HELP (GEOS-Name, in GeoWrite erstellt) */
+#define HELP_FILE       "FGTest Hilfe"
+#define NUM_TABS        10
+#define NUM_REPORT      6       /* Seiten 0-5 bilden den Bericht */
+
+/* Schrift der Bildschirmdarstellung: Systemschrift Esquire (ESQUIRE.FNT,
+ * Font-ID 555 = 0x022B; Bitmapgroessen 9, 10, 12, 14, 18 Punkt).
+ * Der Druck verwendet weiter URW Sans (Umrissschrift). */
+#define FONT_SCREEN     screenFont
+#define FONT_PRINT      FID_DTC_URW_SANS
+/* bis zu dieser Vergroesserung reicht Esquire (max. 18 Punkt), darueber
+ * wird auf die Umrissschrift URW Sans umgeschaltet (Variante A) */
+#define ESQUIRE_MAX_SCALE 0x16666L      /* 1,4 */
+/* kleiner wird die Seite nicht (Esquire gibt es erst ab 9 Punkt);
+ * ist das Fenster kleiner, erscheinen Rollbalken */
+#define MIN_SCALE       0x10000L        /* 1,0 = 640 x 460 */
+
+/* Bildaufbau */
+#define TITLE_H         30
+#define TAB_Y           36
+#define TAB_H           22
+#define TAB_W           62
+#define BODY_TOP        (TAB_Y + TAB_H)
+#define BODY_BOTTOM     436
+#define FOOT_Y          442
+#define ROW_H           15
+#define ROW_Y           (BODY_TOP + 6)
+#define VIS_ROWS        ((BODY_BOTTOM - 6 - ROW_Y) / ROW_H)
+
+/* Seite Schriften */
+#define FONT_ROW_H      22
+#define FONT_LIST_Y     (ROW_Y + 22)
+#define FONT_VIS_ROWS   ((BODY_BOTTOM - 6 - FONT_LIST_Y) / FONT_ROW_H)
+#define MAX_FONT_LIST   200
+#define MAX_FONT_SIZES  8
+#define MAX_TTF_MISSING 40
+
+/* Seite Klang */
+#define SONG_MAX        300
+#define KL_BTN_W        146
+#define KL_BTN_H        26
+#define KL_ROW1_Y       214
+#define KL_ROW2_Y       284
+#define VALUE_X         240
+
+/* Leistungsseite */
+#define BTN_LEFT        480
+#define BTN_TOP         (BODY_BOTTOM - 30)
+#define BTN_RIGHT       624
+#define BTN_BOTTOM      (BODY_BOTTOM - 8)
+#define B_TICKS         30      /* je Test etwa 0,5 Sekunden */
+
+/* Eingabeseite: Malflaeche */
+#define PAD_LEFT        330
+#define PAD_TOP         246
+#define PAD_RIGHT       624
+#define PAD_BOTTOM      428
+#define MAX_POINTS      1000
+#define STROKE_BREAK    (-1)
+#define MAX_KEYS        12
+
+/* Bericht */
+#define MAX_ROWS        120
+#define LABEL_LEN       32
+#define VALUE_LEN       64
+#define RK_ROW          0
+#define RK_HEAD         1
+
+/* Druck (Einheit Punkt, A4) */
+#define PR_W            595
+#define PR_H            842
+#define PR_MARGIN       40
+
+/***********************************************************************
+ *              Prozessorabfrage (386+) als Maschinencode
+ *  Watcom "#pragma aux" mit Bytefolgen: so laeuft es auch, wenn der
+ *  Compiler auf 8086-Code eingestellt ist.
+ ***********************************************************************/
+
+/*
+ * Rueckgabe in BX: 0 = 80386, 1 = 80486 ohne CPUID, 2 = CPUID vorhanden.
+ * Nur aufrufen, wenn der Kernel mindestens einen 80386 meldet.
+ *   cli / pushfd / pop eax / mov ecx,eax / xor eax,40000h (AC) / ...
+ */
+extern word Cpu386Probe(void);
+#pragma aux Cpu386Probe = \
+    0xfa \
+    0x66 0x9c 0x66 0x58 0x66 0x8b 0xc8 \
+    0x66 0x35 0x00 0x00 0x04 0x00 \
+    0x66 0x50 0x66 0x9d 0x66 0x9c 0x66 0x58 \
+    0x66 0x33 0xc1 0x66 0x51 0x66 0x9d \
+    0x33 0xdb \
+    0x66 0xa9 0x00 0x00 0x04 0x00 \
+    0x74 0x22 \
+    0x43 \
+    0x66 0x8b 0xc1 \
+    0x66 0x35 0x00 0x00 0x20 0x00 \
+    0x66 0x50 0x66 0x9d 0x66 0x9c 0x66 0x58 \
+    0x66 0x33 0xc1 0x66 0x51 0x66 0x9d \
+    0x66 0xa9 0x00 0x00 0x20 0x00 \
+    0x74 0x01 \
+    0x43 \
+    0xfb \
+    value [bx] \
+    modify [ax bx cx];
+
+/*
+ * CPUID mit Funktion (hi:lo) -> out[0..3] = EAX, EBX, ECX, EDX
+ *   shl edx,16 / movzx eax,ax / or eax,edx / xor ecx,ecx / cpuid /
+ *   mov es:[di],eax / mov es:[di+4],ebx / mov es:[di+8],ecx / mov es:[di+12],edx
+ */
+extern void CpuidRaw(dword *out, word lo, word hi);
+#pragma aux CpuidRaw = \
+    0x66 0xc1 0xe2 0x10 \
+    0x66 0x0f 0xb7 0xc0 \
+    0x66 0x0b 0xc2 \
+    0x66 0x33 0xc9 \
+    0x0f 0xa2 \
+    0x26 0x66 0x89 0x05 \
+    0x26 0x66 0x89 0x5d 0x04 \
+    0x26 0x66 0x89 0x4d 0x08 \
+    0x26 0x66 0x89 0x55 0x0c \
+    parm [es di] [ax] [dx] \
+    modify [ax bx cx dx];
+
+/* Text aus der Ressource StringsUI (bleibt waehrend der Laufzeit gesperrt) */
+#define STR(o) ((char *) LMemDeref(o))
+
+#define FARPTR(seg, off) ((byte *) ((((dword) (seg)) << 16) | (word) (off)))
+
+/***********************************************************************
+ *              Datentypen
+ ***********************************************************************/
+
+typedef struct {
+    byte    RR_page;
+    byte    RR_kind;
+    char    RR_label[LABEL_LEN];
+    char    RR_value[VALUE_LEN];
+} ReportRow;
+
+typedef struct {
+    sword   SP_x;
+    sword   SP_y;
+} StrokePoint;
+
+/* zusaetzliche Angaben je Schrift (Seite Schriften) */
+typedef struct {
+    byte    FX_outline;                 /* Umrissschrift vorhanden */
+    byte    FX_numSizes;                /* Bitmapgroessen aus der .FNT-Datei */
+    byte    FX_sizes[MAX_FONT_SIZES];
+    char    FX_file[18];                /* DOS-Dateiname, z. B. LED.FNT oder
+                                           TTF\DEJAVU.TTF */
+    byte    FX_ttfFiles;                /* Zahl der TTF-Dateien (Schnitte) */
+} FontExtra;
+
+/* TrueType-Datei, die FreeGEOS nicht als Schrift geladen hat */
+typedef struct {
+    char    TM_file[14];
+    char    TM_family[32];
+} TtfMissing;
+
+typedef struct {
+    word    KE_nr;
+    word    KE_char;
+    word    KE_flags;
+} KeyEntry;
+
+typedef struct {
+    /* Prozessor */
+    word    cpu;                /* Klasse: 0..4, 5, 6, 15 */
+    Boolean cpuid;
+    char    vendor[13];
+    word    fam, mod, step;
+    char    brand[49];
+    dword   feat;
+    Boolean fpu;
+    word    kernSpeed;          /* Kernel: Verhaeltnis zum PC/XT * 10 */
+    dword   loops;              /* eigene Messung: Schleifen pro Sekunde */
+    /* BIOS / Emulator */
+    char    emu[32];
+    Boolean isEmu;
+    char    biosId[VALUE_LEN];
+    char    biosDate[9];
+    byte    modelByte;
+    word    equip;
+    word    com[4];
+    word    lpt[3];
+    byte    hdd;
+    byte    kbd;
+    /* DOS */
+    byte    dosMaj, dosMin, dosOem;
+    Boolean trueOk;
+    byte    trueMaj, trueMin;
+    byte    curDrive;
+    byte    winMaj, winMin;
+    char    comspec[VALUE_LEN];
+    char    blaster[VALUE_LEN];
+    /* Speicher */
+    word    conv;
+    word    cmosExt;
+    Boolean int15ok;
+    word    int15;
+    Boolean xms;
+    word    xmsVer, xmsRev, xmsLarge, xmsFree;
+    Boolean ems;
+    byte    emsVer;
+    word    emsFree, emsTotal;
+    /* Video */
+    word    vmode, vcols;
+    Boolean vbe;
+    word    vbeVer, vbeMem;
+    char    vbeOem[48];
+    char    vbeVendor[40];
+    char    vbeProduct[40];
+    word    vmodeV;
+    Boolean miOk;
+    word    xres, yres, bpp;
+} HwInfo;
+
+/***********************************************************************
+ *              Klassen
+ ***********************************************************************/
+
+@class GTProcessClass, GenProcessClass;
+    @message void MSG_GT_PROCESS_SAVE_REPORT();
+    @message void MSG_GT_PROCESS_COPY_REPORT();
+@endc;
+
+/* Content: leitet die Tastatur an die Seite weiter */
+@class GTContentClass, VisContentClass;
+@endc;
+
+/* Die Seite: eigene Vis-Klasse mit Mausgriff (wie im Original) */
+@class GTPageClass, VisClass;
+    @message (GEN_ITEM_GROUP_APPLY_MSG) MSG_GT_PAGE_MENU_PAGE;
+    @message void MSG_GT_PAGE_SET_PAGE(word page);
+    @message void MSG_GT_PAGE_MEASURE();
+    @message void MSG_GT_PAGE_HELP();
+    @message void MSG_GT_PAGE_INFO();
+    @message void MSG_GT_PAGE_STATUS(const char *msg);
+    @message void MSG_GT_PAGE_KEY(word character, word flags);
+    @instance byte GTPI_drawing = 0;
+@endc;
+
+@classdecl GTProcessClass, neverSaved;
+@classdecl GTContentClass;
+@classdecl GTPageClass;
+
+/***********************************************************************
+ *              Globale Variablen (dgroup)
+ ***********************************************************************/
+
+static HwInfo       hw;
+static Boolean      hwDone      = FALSE;
+
+static ReportRow    rows[MAX_ROWS];
+static word         numRows     = 0;
+
+static word         curPage     = PG_UEBERSICHT;
+static word         lastTab     = PG_UEBERSICHT;
+static word         scrollPos[10];
+static const char  *statusMsg   = NULL;
+
+static word         screenW     = 0, screenH = 0;
+static word         winW        = 0, winH    = 0;
+
+/* Die Seite ist fuer 640 x 460 entworfen und wird auf die Fenstergroesse
+ * skaliert (Schrift wird mit groesser). gScale als WWFixed. */
+static WWFixedAsDWord gScale    = 0x10000L;
+static sword        gOffX       = 0;
+static sword        gOffY       = 0;
+static FontID       screenFont  = FID_ESQUIRE;
+static word         docW        = PAGE_W;   /* Dokumentgroesse (gerollt) */
+static word         docH        = PAGE_H;
+static word         viewW       = 0, viewH = 0;
+static byte         displayType = 0;
+
+/* Leistung */
+static Boolean      benchDone   = FALSE;
+static word         bRect, bText, bEll, bBmp, bMem;
+static dword        bFloat;                 /* Gleitkomma-Operationen/s */
+static volatile double fSink;
+
+/* Mausrad */
+static word         wheelCount  = 0;
+static sword        wheelSum    = 0;
+
+/* Laendereinstellungen (Voreinstellungen von FreeGEOS) */
+static char         thouSep     = '.';
+static char         decSep      = ',';
+
+/* Schriften */
+static MemHandle    fontBlock   = NullHandle;
+static word         numFonts    = 0;
+static word         numTtfFiles = 0;        /* TTF-Dateien in FONT\TTF */
+static word         numTtfMissing = 0;      /* davon nicht geladen */
+static Boolean      ttfDriver   = FALSE;    /* truetype.drvr geladen */
+/* fontBlock: FontEnumStruct[MAX_FONT_LIST], dahinter FontExtra[MAX_FONT_LIST] */
+
+/* Klang */
+static word         songBuf[SONG_MAX];
+static MemHandle    musicHandle = NullHandle;
+static word         instrument  = IP_ACOUSTIC_GRAND_PIANO;
+static word         instrSel    = 0;
+static const char  *soundStatus = NULL;
+static dword        bFileW, bFileR;
+static word         randSeed    = 12345;
+static volatile word benchSink;
+
+/* Eingabe */
+static StrokePoint  points[MAX_POINTS];
+static word         numPoints   = 0;
+static KeyEntry     keys[MAX_KEYS];
+static word         numKeys     = 0;
+static word         keyNr       = 0;
+static sword        mouseX = 0, mouseY = 0;
+static sword        clickX = -1, clickY = -1;
+static word         clicks = 0, ends = 0, drags = 0;
+static word         lastBP = 0;
+
+/* Puffer fuer VESA-Abfragen */
+static byte         vbeInfo[512];
+static byte         vbeMode[256];
+
+/* Programmsymbol als Bitmap (aus GTS1ICON.PCX) */
+#include "gtsicon.h"
+
+/***********************************************************************
+ *              Texte (aus tools/texts_de.txt des Originals)
+ ***********************************************************************/
+
+static const char *tabNames[NUM_TABS];
+
+static const char *footTexts[10];
+
+/* Zeilen: Typ 1 = Überschrift, 0 = Text, 3 = eingerückt, 2 = Abstand */
+static const char *modelNames[8];
+
+
+
+/***********************************************************************
+ *              Application-Ressource
+ ***********************************************************************/
+
+@start AppResource;
+
+@object GenApplicationClass GTApp = {
+    GI_visMoniker = list { @GTTextMoniker, @GTLargeIconMoniker,
+                           @GTSmallIconMoniker, @GTMiniIconMoniker };
+    GI_comp = @GTPrimary;
+    gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_WINDOWS) = @GTPrimary;
+    gcnList(MANUFACTURER_ID_GEOWORKS, MGCNLT_ACTIVE_LIST) = @GTPrintControl;
+    gcnList(MANUFACTURER_ID_GEOWORKS, GAGCNLT_SELF_LOAD_OPTIONS) =
+        @GTPrintControl;
+    ATTR_GEN_APPLICATION_PRINT_CONTROL = @GTPrintControl;
+    ATTR_GEN_HELP_FILE = "FGTest Hilfe";
+}
+
+@visMoniker GTTextMoniker = "FreeGEOS Test";
+
+@end AppResource;
+
+/***********************************************************************
+ *              Programmsymbol (aus GTS1ICON.PCX, tools/pcx2goc.py)
+ ***********************************************************************/
+
+@start ICONRESOURCE, data;
+@include "gtsicon.goh"
+@include "gtsaboutlogo.goh"
+@end ICONRESOURCE;
+
+@start StringsUI, data;
+
+/* Alle sichtbaren Texte des Programms - im ResEdit uebersetzbar. */
+
+@chunk char StrUebersicht[] = "Übersicht";
+@chunk char StrSpeicher[] = "Speicher";
+@chunk char StrBildschirm[] = "Bildschirm";
+@chunk char StrLeistung[] = "Leistung";
+@chunk char StrGrafik[] = "Grafik";
+@chunk char StrEingabe[] = "Eingabe";
+@chunk char StrFussUebersicht[] = "1–9, 0 Seite · N/P blättern · M messen · S speichern · K kopieren · H Hilfe";
+@chunk char StrPfeiltastenOderRollen1[] = "Pfeiltasten oder + / - rollen · 1–9, 0 Seite · M neu messen";
+@chunk char StrMOderKnopfGrafik[] = "M oder Knopf: Grafik, Speicher und Datei messen (dauert einige Sekunden)";
+@chunk char StrAllesHierWirdMit[] = "Alles hier wird mit den Grafikbefehlen des Kernels gezeichnet";
+@chunk char StrJedeTasteWirdAngezeigt[] = "Jede Taste wird angezeigt · Seitenwechsel mit der Maus oder dem Menü Seite";
+@chunk char StrKBMB[] = "%s KB (%s%c%lu MB)";
+@chunk char StrKB[] = "%s KB";
+@chunk char StrNichtGesetzt[] = "nicht gesetzt";
+@chunk char StrPentiumKlasse[] = "Pentium-Klasse";
+@chunk char StrPentiumProKlasseP6[] = "Pentium-Pro-Klasse (P6) oder neuer";
+@chunk char StrPentium4KlasseOder[] = "Pentium-4-Klasse oder neuer";
+@chunk char StrIBMPS2Modell[] = "IBM PS/2 Modell 80";
+@chunk char StrIBMPCConvertible[] = "IBM PC Convertible";
+@chunk char StrIBMPS2Modell2[] = "IBM PS/2 Modell 30";
+@chunk char StrIBMPCXT1986[] = "IBM PC/XT (1986)";
+@chunk char StrIBMATOderKompatibel[] = "IBM AT oder kompatibel";
+@chunk char StrIBMPCjr[] = "IBM PCjr";
+@chunk char StrIBMPCXT[] = "IBM PC/XT";
+@chunk char StrIBMPC[] = "IBM PC";
+@chunk char StrUnbekannt[] = "unbekannt";
+@chunk char StrIBMPCXT1[] = " (IBM PC/XT = 1,0)";
+@chunk char StrBit167Mio[] = "%u Bit (16,7 Mio. Farben)";
+@chunk char StrBitFarben[] = "%u Bit (%s Farben)";
+@chunk char StrMonochrom[] = "Monochrom";
+@chunk char Str4Graustufen[] = "4 Graustufen";
+@chunk char Str4FarbenCGA[] = "4 Farben (CGA)";
+@chunk char StrEchtfarben64KTrueColor[] = "Echtfarben (64K / TrueColor)";
+@chunk char StrVersionProtokoll[] = "Version %u.%u.%u (Protokoll %u.%u)";
+@chunk char StrKeine[] = "keine";
+@chunk char StrProSekunde[] = "%s pro Sekunde";
+@chunk char StrAufEinenBlick[] = "Auf einen Blick";
+@chunk char StrRechner[] = "Rechner";
+@chunk char StrProzessor[] = "Prozessor";
+@chunk char StrRechenkoprozessor[] = "Rechenkoprozessor";
+@chunk char StrVorhanden[] = "vorhanden";
+@chunk char StrNichtVorhanden[] = "nicht vorhanden";
+@chunk char StrGeschwindigkeit[] = "Geschwindigkeit";
+@chunk char StrKBKonventionellKBErweitert[] = "%s KB konventionell + %s KB erweitert";
+@chunk char StrArbeitsspeicher[] = "Arbeitsspeicher";
+@chunk char StrDatumUndUhrzeit[] = "Datum und Uhrzeit";
+@chunk char StrDiesesProgramm[] = "Dieses Programm";
+@chunk char StrFenstergroesse[] = "Fenstergröße";
+@chunk char StrTyp[] = "Typ";
+@chunk char StrHerstellerCPUID[] = "Hersteller (CPUID)";
+@chunk char StrFamilieModellStufe[] = "Familie / Modell / Stufe";
+@chunk char StrBezeichnung[] = "Bezeichnung";
+@chunk char StrIntegriert[] = ", integriert";
+@chunk char StrSchleifenProSekunde[] = "Schleifen pro Sekunde";
+@chunk char StrGeschwindigkeitsindex[] = "Geschwindigkeitsindex";
+@chunk char StrBIOSUndEmulator[] = "BIOS und Emulator";
+@chunk char StrEmulatorBIOS[] = "Emulator / BIOS";
+@chunk char StrKeinEmulatorErkannt[] = "kein Emulator erkannt";
+@chunk char StrBIOSKennung[] = "BIOS-Kennung";
+@chunk char StrBIOSDatum[] = "BIOS-Datum";
+@chunk char StrHUnbekannt[] = "%02Xh (unbekannt)";
+@chunk char StrModellByte[] = "Modell-Byte";
+@chunk char StrAusstattung[] = "Ausstattung";
+@chunk char StrDiskettenlaufwerke[] = "Diskettenlaufwerke";
+@chunk char StrFestplatten[] = "Festplatten";
+@chunk char StrTastatur[] = "Tastatur";
+@chunk char StrErweitert101102Tasten[] = "erweitert (101/102 Tasten)";
+@chunk char StrStandard8384Tasten[] = "Standard (83/84 Tasten)";
+@chunk char StrVersion[] = "Version";
+@chunk char StrWahreVersion3306h[] = "Wahre Version (3306h)";
+@chunk char StrAktuellesLaufwerk[] = "Aktuelles Laufwerk";
+@chunk char StrFreiVon[] = "%s frei von %s";
+@chunk char StrSpeicherplatzGEOS[] = "Speicherplatz (GEOS)";
+@chunk char StrAktivVersion[] = "aktiv, Version %u.%u";
+@chunk char StrNichtAktiv[] = "nicht aktiv";
+@chunk char StrBLASTERSoundkarte[] = "BLASTER (Soundkarte)";
+@chunk char StrKonventionellerSpeicher[] = "Konventioneller Speicher";
+@chunk char StrErweiterungsspeicher[] = "Erweiterungsspeicher";
+@chunk char StrLautCMOS[] = "Laut CMOS";
+@chunk char StrKeinAT[] = "- (kein AT)";
+@chunk char StrNichtUnterstuetzt[] = "nicht unterstützt";
+@chunk char StrINT15hFunktion88h[] = "INT 15h, Funktion 88h";
+@chunk char StrXMSExtendedMemory[] = "XMS (Extended Memory)";
+@chunk char StrVorhandenXMSTreiber[] = "vorhanden, XMS %x.%02x, Treiber %x.%02x";
+@chunk char StrTreiber[] = "Treiber";
+@chunk char StrFreiInsgesamt[] = "Frei insgesamt";
+@chunk char StrGroessterFreierBlock[] = "Größter freier Block";
+@chunk char StrEMSExpandedMemory[] = "EMS (Expanded Memory)";
+@chunk char StrVorhandenEMS[] = "vorhanden, EMS %u.%u";
+@chunk char StrVon[] = "%s von %s";
+@chunk char StrFreiGesamt[] = "Frei / gesamt";
+@chunk char StrGEOSSpeicherverwaltung[] = "GEOS-Speicherverwaltung";
+@chunk char StrHeapGesamt[] = "Heap gesamt";
+@chunk char StrGesamtFrei[] = "%s gesamt, %s frei";
+@chunk char StrHandles[] = "Handles";
+@chunk char StrProzesseBibliothekenTreiber[] = "%lu (%lu Prozesse, %lu Bibliotheken, %lu Treiber)";
+@chunk char StrGeladeneGeodes[] = "Geladene Geodes";
+@chunk char StrHandlesGEOSINI[] = "Handles (GEOS.INI)";
+@chunk char StrAuslagerungsdatei[] = "Auslagerungsdatei";
+@chunk char StrAuslagerungGroesse[] = "Auslagerung (Größe)";
+@chunk char StrGEOSBildschirmtreiber[] = "GEOS-Bildschirmtreiber";
+@chunk char StrGeraet[] = "Gerät";
+@chunk char StrFarbmodus[] = "Farbmodus";
+@chunk char StrBildschirmGEOS[] = "Bildschirm (GEOS)";
+@chunk char StrGrafikkarte[] = "Grafikkarte";
+@chunk char StrVideomodus[] = "Videomodus";
+@chunk char StrAufloesung[] = "Auflösung";
+@chunk char StrFarbtiefe[] = "Farbtiefe";
+@chunk char StrVBE[] = "VBE %u.%u";
+@chunk char StrVESABIOS[] = "VESA-BIOS";
+@chunk char StrHerstellerOEM[] = "Hersteller (OEM)";
+@chunk char StrAnbieterProdukt[] = "Anbieter / Produkt";
+@chunk char StrVideospeicher[] = "Videospeicher";
+@chunk char StrProgrammfenster[] = "Programmfenster";
+@chunk char StrGroesse[] = "Größe";
+@chunk char StrUrsprungImDokument[] = "Ursprung im Dokument";
+@chunk char StrGEOSVerzeichnis[] = "GEOS-Verzeichnis";
+@chunk char StrOberflaeche[] = "Oberfläche";
+@chunk char StrSpezifischeUI[] = "Spezifische UI";
+@chunk char StrSystemschrift[] = "Systemschrift";
+@chunk char StrHintergrund[] = "Hintergrund";
+@chunk char StrAutostart[] = "Autostart";
+@chunk char StrGeraete[] = "Geräte";
+@chunk char StrTastaturtreiber[] = "Tastaturtreiber";
+@chunk char StrMaus[] = "Maus";
+@chunk char StrMaustreiber[] = "Maustreiber";
+@chunk char StrZahlDerDrucker[] = "Zahl der Drucker";
+@chunk char StrDrucker[] = "Drucker";
+@chunk char StrStiftModus[] = "Stift-Modus";
+@chunk char StrJa[] = "ja";
+@chunk char StrNein[] = "nein";
+@chunk char StrGrafikGEOSGrafiksystem[] = "Grafik (GEOS-Grafiksystem)";
+@chunk char StrRechteckeGrFillRect[] = "Rechtecke (GrFillRect)";
+@chunk char StrTexteGrDrawText[] = "Texte (GrDrawText)";
+@chunk char StrEllipsenGrFillEllipse[] = "Ellipsen (GrFillEllipse)";
+@chunk char StrBitmaps48x30GrDrawBitmap[] = "Bitmaps 48x30 (GrDrawBitmap)";
+@chunk char StrSpeicherUndDatei[] = "Speicher und Datei";
+@chunk char StrSpeicherbloeckeMemAlloc[] = "Speicherblöcke (MemAlloc)";
+@chunk char StrKBS[] = "%s KB/s";
+@chunk char StrDateiSchreibenSTATE[] = "Datei schreiben (STATE)";
+@chunk char StrDateiLesenSTATE[] = "Datei lesen (STATE)";
+@chunk char StrStand[] = "Stand";
+@chunk char StrGemessenJeEtwa0[] = "gemessen, je etwa 0,5 Sekunden";
+@chunk char StrNochNichtGemessenKnopf[] = "noch nicht gemessen – Knopf unten rechts oder Taste M";
+@chunk char StrFreeGEOSTest[] = "FreeGEOS Test";
+@chunk char StrSysteminformationUndVorfuehr[] = "Systeminformation und Vorführung des SDK";
+@chunk char StrJetztMessenM[] = "Jetzt messen (M)";
+@chunk char StrRGBVerlaeufeCFRGB[] = "RGB-Verläufe (CF_RGB)";
+@chunk char StrRechteckeFlaechenEllipsen[] = "Rechtecke, Flächen, Ellipsen";
+@chunk char StrFuellmusterGrSetAreaMaskSys[] = "Füllmuster (GrSetAreaMaskSys)";
+@chunk char StrSchriftenUndStile[] = "Schriften und Stile";
+@chunk char StrFett[] = "fett";
+@chunk char StrKursiv[] = "kursiv";
+@chunk char StrUnterstrichen[] = "unterstrichen";
+@chunk char StrDurchgestrichen[] = "durchgestrichen";
+@chunk char StrUmriss[] = "Umriss";
+@chunk char StrGross24[] = "Groß 24";
+@chunk char StrBitmapsGrDrawBitmap[] = "Bitmaps (GrDrawBitmap)";
+@chunk char Str4BitMaske[] = "4 Bit + Maske";
+@chunk char StrZeichensatz[] = "Zeichensatz";
+@chunk char StrHoch[] = "hoch";
+@chunk char StrRunter[] = "runter";
+@chunk char StrBildHoch[] = "Bild hoch";
+@chunk char StrBildRunter[] = "Bild runter";
+@chunk char StrEnde[] = "Ende";
+@chunk char StrRueck[] = "Rück";
+@chunk char StrStrgH[] = "Strg %02Xh";
+@chunk char StrLeer[] = "Leer";
+@chunk char StrTastaturMSGMETAKBD[] = "Tastatur (MSG_META_KBD_CHAR)";
+@chunk char StrLetzteTastenNeuesteOben[] = "Letzte Tasten (neueste oben):";
+@chunk char StrNochKeineTasteGedrueckt[] = "noch keine Taste gedrückt";
+@chunk char StrPosition[] = "Position";
+@chunk char StrKlicks[] = "Klicks";
+@chunk char StrLetzterKlick[] = "Letzter Klick";
+@chunk char StrGedrueckt[] = " – gedrückt";
+@chunk char StrTastenBP[] = "Tasten (BP)";
+@chunk char StrLosgelassenEND[] = "Losgelassen (END)";
+@chunk char StrZiehenDRAG[] = "Ziehen (DRAG)";
+@chunk char StrMausEigenesVisObjekt[] = "Maus (eigenes Vis-Objekt, Mausgriff)";
+@chunk char StrMalflaecheMitGedrueckterMaus[] = "Malfläche: mit gedrückter Maustaste zeichnen";
+@chunk char StrFreeGEOSTestSystembericht[] = "FreeGEOS Test – Systembericht (%s)";
+@chunk char StrFreeGEOSTestSystembericht2[] = "FreeGEOS Test – Systembericht";
+@chunk char StrSeite[] = "Seite %u/%u";
+@chunk char StrBerichtAnDenDrucker[] = "Bericht an den Drucker übergeben";
+@chunk char StrBerichtGespeichertDOCUMENTFG[] = "Bericht gespeichert: DOCUMENT\\FGTEST.TXT";
+@chunk char StrSpeichernFehlgeschlagenDOCUM[] = "Speichern fehlgeschlagen (DOCUMENT\\FGTEST.TXT)";
+@chunk char StrKopierenFehlgeschlagen[] = "Kopieren fehlgeschlagen";
+@chunk char StrSystembericht[] = "Systembericht";
+@chunk char StrBerichtInDieZwischenablage[] = "Bericht in die Zwischenablage kopiert – in GeoWrite einfügen";
+@chunk char StrMessungLaeuft[] = "Messung läuft …";
+@chunk char StrMessungFertig[] = "Messung fertig";
+@chunk char StrSystem[] = "System";
+@chunk char StrGEOS[] = "GEOS";
+
+@chunk char Str16Graustufen[] = "16 Graustufen";
+@chunk char Str256Graustufen[] = "256 Graustufen";
+@chunk char Str16FarbenPalette[] = "16 Farben (Palette)";
+@chunk char Str256FarbenPalette[] = "256 Farben (Palette)";
+@chunk char Str0KBVomXMSTreiber[] = "0 KB (vom XMS-Treiber übernommen)";
+@chunk char Str16Systemfarben[] = "16 Systemfarben (Palettenindex)";
+@chunk char Str24BitNurEchtfarben[] = "24 Bit (nur Echtfarben)";
+@chunk char Str1Bit[] = "1 Bit";
+
+/* --- Seiten Schriften und Klang, Mausrad, Gleitkomma --- */
+@chunk char StrSchriften[] = "Schriften";
+@chunk char StrKlang[] = "Klang";
+@chunk char StrFussSchriften[] = "Pfeiltasten, + / - oder Mausrad rollen · 1–9, 0 Seite";
+@chunk char StrFussKlang[] = "Knöpfe anklicken: Klang über die Sound-Bibliothek";
+@chunk char StrInstallierteSchriften[] = "Installierte Schriften: %u";
+@chunk char StrSchriftSpalten[] = "Name                                 ID              Art";
+@chunk char StrSchriftUmriss[] = "Umriss";
+@chunk char StrBitmapSchrift[] = "Bitmap";
+@chunk char StrSchriftMuster[] = "ÄÖÜ äöü ß € 0123";
+@chunk char StrKeineSchriften[] = "keine Schriften gefunden";
+@chunk char StrKlangSoundBib[] = "Klang (Sound-Bibliothek)";
+@chunk char StrSynthTreiber[] = "Synthesizer-Treiber";
+@chunk char StrSampleTreiber[] = "Sample-Treiber";
+@chunk char StrBlasterSB[] = "BLASTER (Soundkarte)";
+@chunk char StrAbspielen[] = "Abspielen";
+@chunk char StrInstrument[] = "Instrument";
+@chunk char StrTonA440[] = "Ton A (440 Hz)";
+@chunk char StrTonleiterCDur[] = "Tonleiter C-Dur";
+@chunk char StrAlleMeineEntchen[] = "Alle meine Entchen";
+@chunk char StrAkkordCDur[] = "Akkord (3 Stimmen)";
+@chunk char StrKlavier[] = "Klavier";
+@chunk char StrOrgel[] = "Orgel";
+@chunk char StrFloete[] = "Flöte";
+@chunk char StrXylophon[] = "Xylophon";
+@chunk char StrSpieltGerade[] = "Spielt: %s (%s)";
+@chunk char StrKlangFehler[] = "Klang nicht verfügbar (Fehler %u) – Soundtreiber prüfen";
+@chunk char StrKlangHinweis[] = "Beim PC-Lautsprecher klingen alle Instrumente gleich, und Akkorde werden nacheinander gespielt.";
+@chunk char StrMausrad[] = "Mausrad";
+@chunk char StrMausradWert[] = "%u Bewegungen, Summe %d";
+@chunk char StrGleitkomma[] = "Gleitkomma (+, *, /)";
+@chunk char StrGleitkommaWert[] = "%s Operationen pro Sekunde";
+
+@chunk char StrTrueType[] = "TrueType";
+@chunk char StrNimbusUmriss[] = "Nimbus";
+@chunk char StrTrueTypeTreiberInfo[] = "TrueType-Treiber: %s, %u TTF-Dateien in FONT\\TTF";
+@chunk char StrGeladen[] = "geladen";
+@chunk char StrNichtGeladen[] = "nicht geladen";
+@chunk char StrTtfNichtGeladen[] = "TrueType – nicht geladen";
+
+@end StringsUI;
+
+/***********************************************************************
+ *              Interface-Ressource
+ ***********************************************************************/
+
+@start Interface;
+
+@object GenPrimaryClass GTPrimary = {
+    GI_comp = @GTFileMenu, @GTPageMenu, @GTView, @GTAboutDialog;
+    /* passt sich an den Desktop an: maximiert starten, sonst 80 % */
+    HINT_DISPLAY_MAXIMIZED_ON_STARTUP;
+    HINT_SIZE_WINDOW_AS_RATIO_OF_PARENT = {
+        SWSS_RATIO | PCT_80, SWSS_RATIO | PCT_80 };
+    HINT_CENTER_WINDOW;
+    /* echte Hilfe: USERDATA\HELP\FGTest Hilfe, Kontext TOC */
+    ATTR_GEN_HELP_CONTEXT = "TOC";
+}
+
+/* ---------- Menü Datei ---------- */
+
+@object GenInteractionClass GTFileMenu = {
+    GI_attrs = @default | GA_KBD_SEARCH_PATH;
+    GI_comp = @GTFileGroup, @GTPrintControl, @GTMeasureTrigger, @GTInfoGroup;
+    GII_visibility = GIV_POPUP;
+    ATTR_GEN_INTERACTION_GROUP_TYPE = (GIGT_FILE_MENU);
+}
+
+@object GenInteractionClass GTFileGroup = {
+    GI_comp = @GTSaveTrigger, @GTCopyTrigger;
+    GII_visibility = GIV_SUB_GROUP;
+}
+
+@object GenTriggerClass GTSaveTrigger = {
+    GI_visMoniker = 'B', "Bericht speichern";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_GT_PROCESS_SAVE_REPORT;
+}
+
+@object GenTriggerClass GTCopyTrigger = {
+    GI_visMoniker = 'Z', "In Zwischenablage kopieren";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_GT_PROCESS_COPY_REPORT;
+}
+
+@object PrintControlClass GTPrintControl = {
+    GI_states = @default | GS_ENABLED;
+    PCI_attrs = (@default & ~(PCA_PAGE_CONTROLS | PCA_VERIFY_PRINT))
+                | PCA_MARK_APP_BUSY | PCA_SHOW_PROGRESS | PCA_PROGRESS_PAGE;
+    PCI_output = process;
+    PCI_docNameOutput = process;
+    PCI_docSizeInfo = { PR_W, PR_H, PT_PAPER,
+                        { PR_MARGIN, PR_MARGIN, PR_MARGIN, PR_MARGIN } };
+}
+
+@object GenTriggerClass GTMeasureTrigger = {
+    GI_visMoniker = 'N', "Neu messen";
+    GTI_destination = @GTPage;
+    GTI_actionMsg = MSG_GT_PAGE_MEASURE;
+}
+
+@object GenInteractionClass GTInfoGroup = {
+    GI_comp = @GTInfoTrigger;
+    GII_visibility = GIV_SUB_GROUP;
+}
+
+@object GenTriggerClass GTInfoTrigger = {
+    GI_visMoniker = 'I', "Info über FreeGEOS Test";
+    GTI_destination = @GTAboutDialog;
+    GTI_actionMsg = MSG_GEN_INTERACTION_INITIATE;
+    HINT_TRIGGER_BRINGS_UP_WINDOW;
+}
+
+/* ---------- Info-Fenster (wie in GeoMoorhuhn lite) ---------- */
+
+@object GenInteractionClass GTAboutDialog = {
+    GI_visMoniker = "Info über FreeGEOS Test";
+    GI_comp = @GTAboutLine1, @GTAboutLine2, @GTAboutLogoGlyph,
+              @GTAboutLine4, @GTAboutLine5, @GTAboutOK;
+    GII_visibility = GIV_DIALOG;
+    GII_attrs = @default | GIA_MODAL | GIA_NOT_USER_INITIATABLE;
+    HINT_CENTER_CHILDREN_HORIZONTALLY;
+}
+
+@object GenGlyphClass GTAboutLine1 = {
+    GI_visMoniker = "FreeGEOS Test";
+}
+@object GenGlyphClass GTAboutLine2 = {
+    GI_visMoniker = "Version 1.1";
+}
+@object GenGlyphClass GTAboutLogoGlyph = {
+    GI_visMoniker = list { @GTAboutLogo };
+}
+@object GenGlyphClass GTAboutLine4 = {
+    GI_visMoniker = "2026 © by Möllerjaner";
+}
+@object GenGlyphClass GTAboutLine5 = {
+    GI_visMoniker = "Johannes Möller, Syhra";
+}
+@object GenTriggerClass GTAboutOK = {
+    GI_visMoniker = "OK";
+    GI_attrs = @default | GA_SIGNAL_INTERACTION_COMPLETE;
+    HINT_SEEK_REPLY_BAR;
+    HINT_DEFAULT_DEFAULT_ACTION;
+}
+
+/* ---------- Menü Seite ---------- */
+
+@object GenInteractionClass GTPageMenu = {
+    GI_visMoniker = 'S', "Seite";
+    GI_comp = @GTPageList;
+    GII_visibility = GIV_POPUP;
+}
+
+@object GenItemGroupClass GTPageList = {
+    GI_comp = @GTPg0, @GTPg1, @GTPg2, @GTPg3,
+              @GTPg4, @GTPg5, @GTPg6, @GTPg7, @GTPg8, @GTPg9;
+    GIGI_selection = PG_UEBERSICHT;
+    GIGI_destination = @GTPage;
+    GIGI_applyMsg = MSG_GT_PAGE_MENU_PAGE;
+}
+
+@object GenItemClass GTPg0 = { GI_visMoniker = '1', "1 Übersicht";
+                               GII_identifier = PG_UEBERSICHT; }
+@object GenItemClass GTPg1 = { GI_visMoniker = '2', "2 System";
+                               GII_identifier = PG_SYSTEM; }
+@object GenItemClass GTPg2 = { GI_visMoniker = '3', "3 Speicher";
+                               GII_identifier = PG_SPEICHER; }
+@object GenItemClass GTPg3 = { GI_visMoniker = '4', "4 Bildschirm";
+                               GII_identifier = PG_BILDSCHIRM; }
+@object GenItemClass GTPg4 = { GI_visMoniker = '5', "5 GEOS";
+                               GII_identifier = PG_GEOS; }
+@object GenItemClass GTPg5 = { GI_visMoniker = '6', "6 Leistung";
+                               GII_identifier = PG_LEISTUNG; }
+@object GenItemClass GTPg6 = { GI_visMoniker = '7', "7 Grafik";
+                               GII_identifier = PG_GRAFIK; }
+@object GenItemClass GTPg7 = { GI_visMoniker = '8', "8 Eingabe";
+                               GII_identifier = PG_EINGABE; }
+@object GenItemClass GTPg8 = { GI_visMoniker = '9', "9 Schriften";
+                               GII_identifier = PG_SCHRIFTEN; }
+@object GenItemClass GTPg9 = { GI_visMoniker = '0', "0 Klang";
+                               GII_identifier = PG_KLANG; }
+
+/* ---------- Ansicht: füllt das Fenster, Inhalt wird skaliert ---------- */
+
+@object GenViewClass GTView = {
+    GVI_content = @GTContent;
+    GVI_attrs = @default | GVA_FOCUSABLE;
+    GVI_horizAttrs = @default | GVDA_SCROLLABLE;
+    GVI_vertAttrs  = @default | GVDA_SCROLLABLE;
+    GVI_color = { C_LIGHT_GRAY, 0, 0, 0 };
+    HINT_INITIAL_SIZE = { SST_PIXELS | PAGE_W, SST_PIXELS | PAGE_H, 0 };
+    HINT_EXPAND_WIDTH_TO_FIT_PARENT;
+    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
+    HINT_DEFAULT_FOCUS;
+    HINT_DEFAULT_TARGET;
+}
+
+@end Interface;
+
+/***********************************************************************
+ *              Content-Ressource (läuft im Prozess-Thread)
+ ***********************************************************************/
+
+@start Content;
+
+@object GTContentClass GTContent = {
+    VCI_comp = @GTPage;
+}
+
+@object GTPageClass GTPage = {
+}
+
+@end Content;
+
+/* sichtbare Texte stehen in der Ressource StringsUI (ResEdit) */
+static void
+InitStrings(void)
+{
+    tabNames[0] = STR(@StrUebersicht);
+    tabNames[1] = STR(@StrSystem);
+    tabNames[2] = STR(@StrSpeicher);
+    tabNames[3] = STR(@StrBildschirm);
+    tabNames[4] = STR(@StrGEOS);
+    tabNames[5] = STR(@StrLeistung);
+    tabNames[6] = STR(@StrGrafik);
+    tabNames[7] = STR(@StrEingabe);
+    tabNames[8] = STR(@StrSchriften);
+    tabNames[9] = STR(@StrKlang);
+
+    footTexts[0] = STR(@StrFussUebersicht);
+    footTexts[1] = STR(@StrPfeiltastenOderRollen1);
+    footTexts[2] = STR(@StrPfeiltastenOderRollen1);
+    footTexts[3] = STR(@StrPfeiltastenOderRollen1);
+    footTexts[4] = STR(@StrPfeiltastenOderRollen1);
+    footTexts[5] = STR(@StrMOderKnopfGrafik);
+    footTexts[6] = STR(@StrAllesHierWirdMit);
+    footTexts[7] = STR(@StrJedeTasteWirdAngezeigt);
+    footTexts[8] = STR(@StrFussSchriften);
+    footTexts[9] = STR(@StrFussKlang);
+
+
+    modelNames[0] = STR(@StrIBMPS2Modell);
+    modelNames[1] = STR(@StrIBMPCConvertible);
+    modelNames[2] = STR(@StrIBMPS2Modell2);
+    modelNames[3] = STR(@StrIBMPCXT1986);
+    modelNames[4] = STR(@StrIBMATOderKompatibel);
+    modelNames[5] = STR(@StrIBMPCjr);
+    modelNames[6] = STR(@StrIBMPCXT);
+    modelNames[7] = STR(@StrIBMPC);
+}
+
+/***********************************************************************
+ *              Kleine Hilfsfunktionen
+ ***********************************************************************/
+
+#pragma code_seg("DetectCode")
+
+static word
+Rnd(word range)
+{
+    randSeed = randSeed * 25173 + 13849;
+    return (word) (((dword) randSeed * range) >> 16);
+}
+
+static Boolean
+IsPrint(byte c)
+{
+    return (c >= ' ' && c < 0x7f);
+}
+
+/* Zahl mit Tausendertrennzeichen aus den Voreinstellungen: 65536 -> "65.536" */
+static char *
+FmtNum(char *buf, dword n)
+{
+    char  tmp[16];
+    word  len, i, j = 0;
+
+    sprintf(tmp, "%lu", n);
+    len = strlen(tmp);
+    for (i = 0; i < len; i++) {
+        buf[j++] = tmp[i];
+        if ((len - i - 1) % 3 == 0 && i != len - 1 && thouSep) {
+            buf[j++] = thouSep;
+        }
+    }
+    buf[j] = 0;
+    return buf;
+}
+
+/* KB-Wert: "15.360 KB (15,0 MB)" */
+static char *
+FmtKB(char *buf, dword kb)
+{
+    char  n[16];
+    dword mb10 = (kb * 10 + 512) / 1024;
+
+    FmtNum(n, kb);
+    if (kb >= 1024) {
+        char m[16];
+        FmtNum(m, mb10 / 10);
+        sprintf(buf, STR(@StrKBMB), n, m, decSep, mb10 % 10);
+    } else {
+        sprintf(buf, STR(@StrKB), n);
+    }
+    return buf;
+}
+
+/* Wert *10 -> "x,y" */
+static char *
+FmtDec1(char *buf, dword v10)
+{
+    char n[16];
+    FmtNum(n, v10 / 10);
+    sprintf(buf, "%s%c%lu", n, decSep, v10 % 10);
+    return buf;
+}
+
+/* Text aus fernem Speicher, nur druckbare Zeichen */
+static void
+CopyFar(char *dst, const byte *src, word max)
+{
+    word i;
+    for (i = 0; i < max && src[i]; i++) {
+        dst[i] = IsPrint(src[i]) ? (char) src[i] : '?';
+    }
+    dst[i] = 0;
+    while (i > 0 && dst[i - 1] == ' ') {
+        dst[--i] = 0;
+    }
+}
+
+static void
+CopyFarPtr(char *dst, const byte *info, word ofs, word max)
+{
+    dword fp = *(const dword *) (info + ofs);
+    if (fp) {
+        CopyFar(dst, FARPTR(fp >> 16, fp & 0xffff), max);
+    } else {
+        dst[0] = 0;
+    }
+}
+
+static void
+ReadIni(char *buf, const char *cat, const char *key)
+{
+    word size;
+    if (InitFileReadStringBuffer(cat, key, buf,
+                                 (VALUE_LEN - 1) & IFRF_SIZE, &size)) {
+        strcpy(buf, STR(@StrNichtGesetzt));
+    }
+}
+
+/***********************************************************************
+ *              Rechner auslesen (nur lesende Abfragen)
+ ***********************************************************************/
+
+static void
+DetectCpu(void)
+{
+    dword cfg = SysGetConfig();
+    dword r[4];
+    word  probe;
+
+    hw.cpu = SGC_PROCESSOR(cfg);
+    hw.cpuid = FALSE;
+    hw.vendor[0] = hw.brand[0] = 0;
+    hw.feat = 0;
+    hw.fam = hw.mod = hw.step = 0;
+
+    if (hw.cpu >= SPT_80386) {
+        probe = Cpu386Probe();
+        if (probe >= 1) {
+            hw.cpu = 4;
+        }
+        if (probe == 2) {
+            hw.cpuid = TRUE;
+            CpuidRaw(r, 0, 0);
+            memcpy(hw.vendor, &r[1], 4);
+            memcpy(hw.vendor + 4, &r[3], 4);
+            memcpy(hw.vendor + 8, &r[2], 4);
+            hw.vendor[12] = 0;
+            if (r[0] >= 1) {
+                dword sig;
+                CpuidRaw(r, 1, 0);
+                sig = r[0];
+                hw.feat = r[3];
+                hw.step = (word) (sig & 15);
+                hw.mod  = (word) ((sig >> 4) & 15);
+                hw.fam  = (word) ((sig >> 8) & 15);
+                if (hw.fam == 15) {
+                    hw.fam += (word) ((sig >> 20) & 0xff);
+                }
+                if (hw.fam >= 6) {
+                    hw.mod += (word) (((sig >> 16) & 15) << 4);
+                }
+                if (hw.fam == 4)        hw.cpu = 4;
+                else if (hw.fam == 5)   hw.cpu = 5;
+                else if (hw.fam < 15)   hw.cpu = 6;
+                else                    hw.cpu = 15;
+            }
+            CpuidRaw(r, 0, 0x8000);
+            if (r[0] >= 0x80000004L && r[0] <= 0x800000ffL) {
+                CpuidRaw((dword *) hw.brand,        2, 0x8000);
+                CpuidRaw((dword *) (hw.brand + 16), 3, 0x8000);
+                CpuidRaw((dword *) (hw.brand + 32), 4, 0x8000);
+                hw.brand[48] = 0;
+            }
+        }
+    }
+    hw.fpu = ((byte) cfg & SCF_COPROC) || (hw.feat & 1);
+    hw.kernSpeed = (word) SysGetInfo(SGIT_CPU_SPEED);
+}
+
+/* Emulator- und BIOS-Kennungen (klein geschrieben) */
+typedef struct {
+    byte        S_emu;
+    const char *S_pat;
+    const char *S_label;
+} BiosSig;
+
+static const BiosSig sigs[] = {
+    { 1, "dosbox-x",            "DOSBox-X" },
+    { 1, "basebox",             "Basebox (DOSBox-Variante)" },
+    { 1, "dosbox staging",      "DOSBox Staging" },
+    { 1, "dosbox",              "DOSBox" },
+    { 1, "86box",               "86Box" },
+    { 1, "pcem",                "PCem" },
+    { 1, "qemu",                "QEMU" },
+    { 1, "bochs",               "Bochs" },
+    { 1, "virtualbox",          "VirtualBox" },
+    { 1, "vbox",                "VirtualBox" },
+    { 1, "vmware",              "VMware" },
+    { 1, "seabios",             "SeaBIOS (QEMU/KVM)" },
+    { 1, "pcjs",                "PCjs" },
+    { 1, "martypc",             "MartyPC" },
+    { 0, "award",               "Award-BIOS" },
+    { 0, "phoenix",             "Phoenix-BIOS" },
+    { 0, "american megatrends", "AMI-BIOS" },
+    { 0, "compaq",              "Compaq-BIOS" },
+    { 0, "mr bios",             "MR BIOS" },
+    { 0, "quadtel",             "Quadtel-BIOS" },
+    { 0, "ibm",                 "IBM-BIOS" },
+    { 0, NULL,                  NULL }
+};
+
+static byte
+Lower(byte c)
+{
+    return (c >= 'A' && c <= 'Z') ? (byte) (c + 32) : c;
+}
+
+static void
+BiosIdAt(const byte *mem, word pos)
+{
+    word start = pos, i = 0;
+    while (start > 0 && pos - start < 60 && IsPrint(mem[start - 1])) {
+        start--;
+    }
+    while (i < VALUE_LEN - 1 && IsPrint(mem[start + i])) {
+        hw.biosId[i] = (char) mem[start + i];
+        i++;
+    }
+    hw.biosId[i] = 0;
+}
+
+/* sucht in seg:0..len nach den Kennungen; TRUE, wenn ein Emulator */
+static Boolean
+SigScan(word seg, word len)
+{
+    const byte *mem = FARPTR(seg, 0);
+    word        pos, k, j;
+    byte        c;
+
+    for (pos = 0; pos < len; pos++) {
+        c = Lower(mem[pos]);
+        if (c < 'a' || c > 'z') {
+            if (c != '8') continue;
+        }
+        for (k = 0; sigs[k].S_pat; k++) {
+            const char *p = sigs[k].S_pat;
+            if ((byte) p[0] != c) continue;
+            for (j = 1; p[j] && Lower(mem[pos + j]) == (byte) p[j]; j++) ;
+            if (p[j]) continue;
+            /* Treffer */
+            if (sigs[k].S_emu) {
+                strcpy(hw.emu, sigs[k].S_label);
+                hw.isEmu = TRUE;
+                BiosIdAt(mem, pos);
+                return TRUE;
+            }
+            if (!hw.emu[0]) {
+                strcpy(hw.emu, sigs[k].S_label);
+                BiosIdAt(mem, pos);
+            }
+        }
+    }
+    return FALSE;
+}
+
+static void
+DetectBios(void)
+{
+    const byte *bios = FARPTR(0xf000, 0);
+    const byte *bda  = FARPTR(0x0040, 0);
+    word        i, v_equip = 0;
+
+    for (i = 0; i < 8; i++) {
+        byte c = bios[0xfff5 + i];
+        hw.biosDate[i] = IsPrint(c) ? (char) c : '?';
+    }
+    hw.biosDate[8] = 0;
+    hw.modelByte = bios[0xfffe];
+
+    _asm {
+        int 11h
+        mov v_equip, ax
+    }
+    hw.equip = v_equip;
+    for (i = 0; i < 4; i++) hw.com[i] = *(const word *) (bda + i * 2);
+    for (i = 0; i < 3; i++) hw.lpt[i] = *(const word *) (bda + 8 + i * 2);
+    hw.hdd = bda[0x75];
+    hw.kbd = bda[0x96];
+
+    hw.emu[0] = 0;
+    hw.biosId[0] = 0;
+    hw.isEmu = FALSE;
+    if (!SigScan(0xf000, 0xfff0)) {
+        SigScan(0xc000, 0x7ff0);
+    }
+}
+
+static void
+DetectMemory(void)
+{
+    word v_kb = 0, v_cmos = 0, v_r = 0, v_cf = 0;
+    word v_ver = 0, v_rev = 0, v_large = 0, v_total = 0;
+    dword v_entry = 0;
+    dword vec;
+    const byte *dev;
+    static const char emm[] = "EMMXXXX0";
+    byte v_stat = 0xff, v_ev = 0;
+    word v_efree = 0, v_etotal = 0;
+
+    _asm {
+        int 12h
+        mov v_kb, ax
+    }
+    hw.conv = v_kb;
+
+    hw.cmosExt = 0;
+    hw.int15ok = FALSE;
+    if (hw.cpu >= SPT_80286) {
+        _asm {
+            cli
+            mov al, 18h
+            out 70h, al
+            nop
+            nop
+            in al, 71h
+            mov ah, al
+            mov al, 17h
+            out 70h, al
+            nop
+            nop
+            in al, 71h
+            mov v_cmos, ax
+            mov al, 0Dh
+            out 70h, al
+            sti
+        }
+        hw.cmosExt = v_cmos;
+        _asm {
+            mov ah, 88h
+            clc
+            int 15h
+            sbb cx, cx
+            mov v_r, ax
+            mov v_cf, cx
+        }
+        if (!v_cf) {
+            hw.int15ok = TRUE;
+            hw.int15 = v_r;
+        }
+    }
+
+    /* XMS */
+    hw.xms = FALSE;
+    _asm {
+        mov ax, 4300h
+        int 2Fh
+        mov v_r, ax
+    }
+    if ((v_r & 0xff) == 0x80) {
+        _asm {
+            push es
+            mov ax, 4310h
+            int 2Fh
+            mov word ptr v_entry, bx
+            mov word ptr v_entry+2, es
+            pop es
+        }
+        if (v_entry) {
+            _asm {
+                mov ah, 0
+                call dword ptr v_entry
+                mov v_ver, ax
+                mov v_rev, bx
+            }
+            _asm {
+                mov ah, 8
+                mov bl, 0
+                call dword ptr v_entry
+                mov v_large, ax
+                mov v_total, dx
+            }
+            hw.xms = TRUE;
+            hw.xmsVer = v_ver;
+            hw.xmsRev = v_rev;
+            hw.xmsLarge = v_large;
+            hw.xmsFree = v_total;
+        }
+    }
+
+    /* EMS: Geraetename "EMMXXXX0" am Interrupt 67h */
+    hw.ems = FALSE;
+    vec = *(const dword *) FARPTR(0, 0x67 * 4);
+    dev = FARPTR(vec >> 16, 0x0a);
+    if (vec && memcmp(dev, emm, 8) == 0) {
+        _asm {
+            mov ah, 40h
+            int 67h
+            mov v_stat, ah
+        }
+        if (v_stat == 0) {
+            _asm {
+                mov ah, 46h
+                int 67h
+                mov v_stat, ah
+                mov v_ev, al
+            }
+            if (v_stat == 0) {
+                _asm {
+                    mov ah, 42h
+                    int 67h
+                    mov v_stat, ah
+                    mov v_efree, bx
+                    mov v_etotal, dx
+                }
+                if (v_stat == 0) {
+                    hw.ems = TRUE;
+                    hw.emsVer = v_ev;
+                    hw.emsFree = v_efree;
+                    hw.emsTotal = v_etotal;
+                }
+            }
+        }
+    }
+}
+
+static void
+DetectDos(void)
+{
+    word v_a = 0, v_b = 0, v_d = 0, v_w = 0;
+
+    SysLockBIOS();
+    _asm {
+        mov ax, 3000h
+        int 21h
+        mov v_a, ax
+        mov v_b, bx
+    }
+    hw.dosMaj = (byte) v_a;
+    hw.dosMin = (byte) (v_a >> 8);
+    hw.dosOem = (byte) (v_b >> 8);
+    _asm {
+        mov ax, 3306h
+        mov bx, 0
+        int 21h
+        mov v_a, ax
+        mov v_b, bx
+    }
+    hw.trueOk = ((byte) v_a != 0xff) && v_b != 0;
+    hw.trueMaj = (byte) v_b;
+    hw.trueMin = (byte) (v_b >> 8);
+    _asm {
+        mov ah, 19h
+        int 21h
+        mov v_d, ax
+    }
+    hw.curDrive = (byte) v_d;
+    SysUnlockBIOS();
+
+    _asm {
+        mov ax, 1600h
+        int 2Fh
+        mov v_w, ax
+    }
+    if ((byte) v_w == 0 || (byte) v_w == 0x80) {
+        hw.winMaj = hw.winMin = 0;
+    } else if ((byte) v_w == 1 || (byte) v_w == 0xff) {
+        hw.winMaj = 2;
+        hw.winMin = 0;
+    } else {
+        hw.winMaj = (byte) v_w;
+        hw.winMin = (byte) (v_w >> 8);
+    }
+
+    if (SysGetDosEnvironment("COMSPEC", hw.comspec, VALUE_LEN)) {
+        strcpy(hw.comspec, STR(@StrNichtGesetzt));
+    }
+    if (SysGetDosEnvironment("BLASTER", hw.blaster, VALUE_LEN)) {
+        strcpy(hw.blaster, STR(@StrNichtGesetzt));
+    }
+}
+
+/* BIOS-Standardmodi: Modus, Breite, Hoehe, Bit */
+static const word vmodes[] = {
+    0x04, 320, 200, 2,   0x06, 640, 200, 1,   0x0d, 320, 200, 4,
+    0x0e, 640, 200, 4,   0x0f, 640, 350, 1,   0x10, 640, 350, 4,
+    0x11, 640, 480, 1,   0x12, 640, 480, 4,   0x13, 320, 200, 8,
+    0xffff
+};
+
+static void
+DetectVideo(void)
+{
+    word  v_m = 0, v_res = 0, v_mode = 0, i;
+    byte *v_p;
+
+    _asm {
+        push bp
+        mov ah, 0Fh
+        int 10h
+        pop bp
+        mov v_m, ax
+    }
+    hw.vmode = v_m & 0x7f;
+    hw.vcols = v_m >> 8;
+
+    hw.vbe = FALSE;
+    hw.miOk = FALSE;
+    memset(vbeInfo, 0, sizeof(vbeInfo));
+    memcpy(vbeInfo, "VBE2", 4);
+    v_p = vbeInfo;
+    _asm {
+        push es
+        push di
+        les di, v_p
+        mov ax, 4F00h
+        push bp
+        int 10h
+        pop bp
+        mov v_res, ax
+        pop di
+        pop es
+    }
+    hw.vmodeV = hw.vmode;
+    if (v_res == 0x004f && memcmp(vbeInfo, "VESA", 4) == 0) {
+        hw.vbe = TRUE;
+        hw.vbeVer = *(word *) (vbeInfo + 4);
+        hw.vbeMem = *(word *) (vbeInfo + 0x12);
+        CopyFarPtr(hw.vbeOem, vbeInfo, 6, sizeof(hw.vbeOem) - 1);
+        hw.vbeVendor[0] = hw.vbeProduct[0] = 0;
+        if (hw.vbeVer >= 0x0200) {
+            CopyFarPtr(hw.vbeVendor, vbeInfo, 0x16, sizeof(hw.vbeVendor) - 1);
+            CopyFarPtr(hw.vbeProduct, vbeInfo, 0x1a, sizeof(hw.vbeProduct) - 1);
+        }
+        _asm {
+            push bp
+            mov ax, 4F03h
+            int 10h
+            pop bp
+            mov v_res, ax
+            mov v_mode, bx
+        }
+        if (v_res == 0x004f) {
+            hw.vmodeV = v_mode & 0x3fff;
+            memset(vbeMode, 0, sizeof(vbeMode));
+            v_p = vbeMode;
+            v_mode = hw.vmodeV;
+            _asm {
+                push es
+                push di
+                les di, v_p
+                mov cx, v_mode
+                mov ax, 4F01h
+                push bp
+                int 10h
+                pop bp
+                mov v_res, ax
+                pop di
+                pop es
+            }
+            if (v_res == 0x004f) {
+                hw.xres = *(word *) (vbeMode + 0x12);
+                hw.yres = *(word *) (vbeMode + 0x14);
+                hw.bpp  = vbeMode[0x19];
+                hw.miOk = TRUE;
+                return;
+            }
+        }
+    }
+    for (i = 0; vmodes[i] != 0xffff; i += 4) {
+        if (vmodes[i] == hw.vmodeV) {
+            hw.xres = vmodes[i + 1];
+            hw.yres = vmodes[i + 2];
+            hw.bpp  = vmodes[i + 3];
+            hw.miOk = TRUE;
+            break;
+        }
+    }
+}
+
+/* Leistung: Schleifen pro Sekunde (eigene Messung) */
+static void
+MeasureLoops(void)
+{
+    dword start, end, n = 0;
+    word  i;
+
+    start = TimerGetCount();
+    while (TimerGetCount() == start) ;          /* auf Tick warten */
+    start = TimerGetCount();
+    end = start + 30;
+    while (TimerGetCount() < end) {
+        for (i = 0; i < 100; i++) {
+            benchSink += i;
+        }
+        n += 100;
+    }
+    hw.loops = n * 2;                           /* 30 Ticks = 0,5 s */
+}
+
+static void
+GatherInfo(void)
+{
+    DetectCpu();
+    DetectBios();
+    DetectMemory();
+    DetectDos();
+    DetectVideo();
+    MeasureLoops();
+    hwDone = TRUE;
+}
+
+/***********************************************************************
+ *              Werte aufbereiten
+ ***********************************************************************/
+
+static const char *
+CpuName(void)
+{
+    switch (hw.cpu) {
+        case 0:  return "8086 / 8088";
+        case 1:  return "80186 / 80188";
+        case 2:  return "80286";
+        case 3:  return "80386";
+        case 4:  return "80486";
+        case 5:  return STR(@StrPentiumKlasse);
+        case 6:  return STR(@StrPentiumProKlasseP6);
+        default: return STR(@StrPentium4KlasseOder);
+    }
+}
+
+#pragma code_seg("ReportCode")
+
+
+static const char *
+MachineName(void)
+{
+    if (hw.emu[0] && hw.isEmu) return hw.emu;
+    if (hw.modelByte >= 0xf8) return modelNames[hw.modelByte - 0xf8];
+    return STR(@StrUnbekannt);
+}
+
+static char *
+SpeedText(char *buf)
+{
+    FmtDec1(buf, hw.kernSpeed);
+    strcat(buf, STR(@StrIBMPCXT1));
+    return buf;
+}
+
+static char *
+DepthText(char *buf, word bpp)
+{
+    char n[16];
+    dword colors;
+    if (bpp == 0) {
+        strcpy(buf, STR(@StrUnbekannt));
+        return buf;
+    }
+    if (bpp >= 24) {
+        sprintf(buf, STR(@StrBit167Mio), bpp);
+        return buf;
+    }
+    colors = 1L << (bpp == 15 ? 15 : bpp);
+    sprintf(buf, STR(@StrBitFarben), bpp, FmtNum(n, colors));
+    return buf;
+}
+
+static const char *
+ColorModeText(void)
+{
+    switch ((displayType & DT_DISP_CLASS) >> DT_DISP_CLASS_OFFSET) {
+        case DC_GRAY_1:  return STR(@StrMonochrom);
+        case DC_GRAY_2:  return STR(@Str4Graustufen);
+        case DC_GRAY_4:  return STR(@Str16Graustufen);
+        case DC_GRAY_8:  return STR(@Str256Graustufen);
+        case DC_COLOR_2: return STR(@Str4FarbenCGA);
+        case DC_COLOR_4: return STR(@Str16FarbenPalette);
+        case DC_COLOR_8: return STR(@Str256FarbenPalette);
+        case DC_CF_RGB:  return STR(@StrEchtfarben64KTrueColor);
+        default:         return STR(@StrUnbekannt);
+    }
+}
+
+static char *
+DosText(char *buf)
+{
+    const char *oem;
+    switch (hw.dosOem) {
+        case 0x00: oem = "PC DOS";  break;
+        case 0xff: oem = "MS-DOS";  break;
+        case 0xee: oem = "DR-DOS";  break;
+        case 0xfd: oem = "FreeDOS"; break;
+        default:   oem = "OEM";     break;
+    }
+    sprintf(buf, "%u.%02u %s", hw.dosMaj, hw.dosMin, oem);
+    return buf;
+}
+
+static char *
+GeodeVersion(char *buf, const char *perm)
+{
+    GeodeHandle   gh = GeodeFind(perm, GEODE_NAME_SIZE, 0, 0);
+    ReleaseNumber rn;
+    ProtocolNumber pn;
+
+    if (gh) {
+        GeodeGetInfo(gh, GGIT_GEODE_RELEASE, &rn);
+        GeodeGetInfo(gh, GGIT_GEODE_PROTOCOL, &pn);
+        sprintf(buf, STR(@StrVersionProtokoll),
+                rn.RN_major, rn.RN_minor, rn.RN_change,
+                pn.PN_major, pn.PN_minor);
+    } else {
+        strcpy(buf, STR(@StrUnbekannt));
+    }
+    return buf;
+}
+
+static char *
+DateTimeText(char *buf)
+{
+    /* Format aus den FreeGEOS-Voreinstellungen (Land/Sprache) */
+    TimerDateAndTime t;
+    word len;
+    TimerGetDateAndTime(&t);
+    len = LocalFormatDateTime(buf, DTF_LONG, &t);
+    buf[len++] = ',';
+    buf[len++] = ' ';
+    LocalFormatDateTime(buf + len, DTF_HMS, &t);
+    return buf;
+}
+
+static char *
+Ports(char *buf, const word *addr, word n, const char *name)
+{
+    word i, cnt = 0;
+    char t[20];
+    buf[0] = 0;
+    for (i = 0; i < n; i++) {
+        if (addr[i]) {
+            sprintf(t, "%s%s%u (%Xh)", cnt ? ", " : "", name, i + 1, addr[i]);
+            strcat(buf, t);
+            cnt++;
+        }
+    }
+    if (!cnt) strcpy(buf, STR(@StrKeine));
+    return buf;
+}
+
+static char *
+OpsText(char *buf, dword n)
+{
+    char t[16];
+    sprintf(buf, STR(@StrProSekunde), FmtNum(t, n));
+    return buf;
+}
+
+/***********************************************************************
+ *              Bericht aufbauen (Seiten 0-5)
+ ***********************************************************************/
+
+static byte rPage;
+
+static void
+RHead(const char *text)
+{
+    if (numRows < MAX_ROWS) {
+        rows[numRows].RR_page = rPage;
+        rows[numRows].RR_kind = RK_HEAD;
+        strncpy(rows[numRows].RR_label, text, LABEL_LEN - 1);
+        rows[numRows].RR_label[LABEL_LEN - 1] = 0;
+        rows[numRows].RR_value[0] = 0;
+        numRows++;
+    }
+}
+
+static void
+RRow(const char *label, const char *value)
+{
+    if (numRows < MAX_ROWS) {
+        rows[numRows].RR_page = rPage;
+        rows[numRows].RR_kind = RK_ROW;
+        strncpy(rows[numRows].RR_label, label, LABEL_LEN - 1);
+        rows[numRows].RR_label[LABEL_LEN - 1] = 0;
+        strncpy(rows[numRows].RR_value, value, VALUE_LEN - 1);
+        rows[numRows].RR_value[VALUE_LEN - 1] = 0;
+        numRows++;
+    }
+}
+
+static void
+BuildReport(void)
+{
+    char v[VALUE_LEN + 40], t[40], t2[40];
+    word x;
+    DiskHandle dh;
+    DiskInfoStruct dis;
+    char *path;
+
+    if (!hwDone) {
+        GatherInfo();
+    }
+    numRows = 0;
+
+    /* ================= Seite 1: Übersicht ================= */
+    rPage = PG_UEBERSICHT;
+    RHead(STR(@StrAufEinenBlick));
+    RRow(STR(@StrRechner), MachineName());
+    RRow(STR(@StrProzessor), CpuName());
+    RRow(STR(@StrRechenkoprozessor), hw.fpu ? STR(@StrVorhanden) : STR(@StrNichtVorhanden));
+    RRow(STR(@StrGeschwindigkeit), SpeedText(v));
+    x = hw.int15ok ? hw.int15 : hw.cmosExt;
+    if (hw.xms) x = hw.xmsFree > x ? hw.xmsFree : x;
+    sprintf(v, STR(@StrKBKonventionellKBErweitert),
+            FmtNum(t, hw.conv), FmtNum(t2, hw.cmosExt ? hw.cmosExt : x));
+    RRow(STR(@StrArbeitsspeicher), v);
+    if (hw.miOk) {
+        sprintf(v, "%u x %u, ", hw.xres, hw.yres);
+        DepthText(v + strlen(v), hw.bpp);
+    } else {
+        sprintf(v, "%u x %u, %s", screenW, screenH, ColorModeText());
+    }
+    RRow(STR(@StrGrafik), v);
+    RRow("FreeGEOS", GeodeVersion(v, "geos    "));
+    RRow("DOS", DosText(v));
+    RRow(STR(@StrDatumUndUhrzeit), DateTimeText(v));
+    RHead(STR(@StrDiesesProgramm));
+    sprintf(v, "%u x %u", winW, winH);
+    RRow(STR(@StrFenstergroesse), v);
+
+    /* ================= Seite 2: System ================= */
+    rPage = PG_SYSTEM;
+    RHead(STR(@StrProzessor));
+    RRow(STR(@StrTyp), CpuName());
+    if (hw.cpuid) {
+        RRow(STR(@StrHerstellerCPUID), hw.vendor);
+        sprintf(v, "%u / %u / %u", hw.fam, hw.mod, hw.step);
+        RRow(STR(@StrFamilieModellStufe), v);
+        if (hw.brand[0]) {
+            char *b = hw.brand;
+            while (*b == ' ') b++;
+            RRow(STR(@StrBezeichnung), b);
+        }
+    }
+    strcpy(v, hw.fpu ? STR(@StrVorhanden) : STR(@StrNichtVorhanden));
+    if (hw.feat & 1) strcat(v, STR(@StrIntegriert));
+    RRow(STR(@StrRechenkoprozessor), v);
+    RRow(STR(@StrSchleifenProSekunde), FmtNum(v, hw.loops));
+    RRow(STR(@StrGeschwindigkeitsindex), SpeedText(v));
+    RHead(STR(@StrBIOSUndEmulator));
+    RRow(STR(@StrEmulatorBIOS), hw.emu[0] ? hw.emu : STR(@StrKeinEmulatorErkannt));
+    if (hw.biosId[0]) RRow(STR(@StrBIOSKennung), hw.biosId);
+    RRow(STR(@StrBIOSDatum), hw.biosDate);
+    if (hw.modelByte >= 0xf8) {
+        sprintf(v, "%02Xh (%s)", hw.modelByte, modelNames[hw.modelByte - 0xf8]);
+    } else {
+        sprintf(v, STR(@StrHUnbekannt), hw.modelByte);
+    }
+    RRow(STR(@StrModellByte), v);
+    RHead(STR(@StrAusstattung));
+    sprintf(v, "%u", (hw.equip & 1) ? ((hw.equip >> 6) & 3) + 1 : 0);
+    RRow(STR(@StrDiskettenlaufwerke), v);
+    sprintf(v, "%u", hw.hdd);
+    RRow(STR(@StrFestplatten), v);
+    RRow("Serielle Schnittstellen", Ports(v, hw.com, 4, "COM"));
+    RRow("Parallele Schnittstellen", Ports(v, hw.lpt, 3, "LPT"));
+    RRow(STR(@StrTastatur), (hw.kbd & 0x10) ? STR(@StrErweitert101102Tasten)
+                                     : STR(@StrStandard8384Tasten));
+    RHead("DOS");
+    RRow(STR(@StrVersion), DosText(v));
+    if (hw.trueOk) {
+        sprintf(v, "%u.%02u", hw.trueMaj, hw.trueMin);
+        RRow(STR(@StrWahreVersion3306h), v);
+    }
+    sprintf(v, "%c:", 'A' + hw.curDrive);
+    RRow(STR(@StrAktuellesLaufwerk), v);
+    dh = (DiskHandle) SysGetInfo(SGIT_SYSTEM_DISK);
+    if (dh && !DiskGetVolumeInfo(dh, &dis)) {
+        FmtKB(t, (dword) dis.DIS_freeSpace / 1024);
+        FmtKB(t2, (dword) dis.DIS_totalSpace / 1024);
+        sprintf(v, STR(@StrFreiVon), t, t2);
+    } else {
+        strcpy(v, STR(@StrUnbekannt));
+    }
+    RRow(STR(@StrSpeicherplatzGEOS), v);
+    if (hw.winMaj) {
+        sprintf(v, STR(@StrAktivVersion), hw.winMaj, hw.winMin);
+    } else {
+        strcpy(v, STR(@StrNichtAktiv));
+    }
+    RRow("Windows", v);
+    RRow("COMSPEC", hw.comspec);
+    RRow(STR(@StrBLASTERSoundkarte), hw.blaster);
+
+    /* ================= Seite 3: Speicher ================= */
+    rPage = PG_SPEICHER;
+    RHead(STR(@StrKonventionellerSpeicher));
+    RRow("INT 12h", FmtKB(v, hw.conv));
+    RHead(STR(@StrErweiterungsspeicher));
+    RRow(STR(@StrLautCMOS), hw.cpu >= 2 ? FmtKB(v, hw.cmosExt) : STR(@StrKeinAT));
+    if (hw.int15ok) {
+        if (hw.int15 == 0 && hw.xms) {
+            strcpy(v, STR(@Str0KBVomXMSTreiber));
+        } else {
+            FmtKB(v, hw.int15);
+        }
+    } else {
+        strcpy(v, STR(@StrNichtUnterstuetzt));
+    }
+    RRow(STR(@StrINT15hFunktion88h), v);
+    RHead(STR(@StrXMSExtendedMemory));
+    if (hw.xms) {
+        sprintf(v, STR(@StrVorhandenXMSTreiber),
+                hw.xmsVer >> 8, hw.xmsVer & 0xff,
+                hw.xmsRev >> 8, hw.xmsRev & 0xff);
+        RRow(STR(@StrTreiber), v);
+        RRow(STR(@StrFreiInsgesamt), FmtKB(v, hw.xmsFree));
+        RRow(STR(@StrGroessterFreierBlock), FmtKB(v, hw.xmsLarge));
+    } else {
+        RRow(STR(@StrTreiber), STR(@StrNichtVorhanden));
+    }
+    RHead(STR(@StrEMSExpandedMemory));
+    if (hw.ems) {
+        sprintf(v, STR(@StrVorhandenEMS), hw.emsVer >> 4, hw.emsVer & 15);
+        RRow(STR(@StrTreiber), v);
+        FmtKB(t, (dword) hw.emsFree * 16);
+        FmtKB(t2, (dword) hw.emsTotal * 16);
+        sprintf(v, STR(@StrVon), t, t2);
+        RRow(STR(@StrFreiGesamt), v);
+    } else {
+        RRow(STR(@StrTreiber), STR(@StrNichtVorhanden));
+    }
+    RHead(STR(@StrGEOSSpeicherverwaltung));
+    RRow(STR(@StrHeapGesamt), FmtKB(v, SysGetInfo(SGIT_HEAP_SIZE) / 64));
+    RRow(STR(@StrGroessterFreierBlock),
+         FmtKB(v, (SysGetInfo(SGIT_LARGEST_FREE_BLOCK) & 0xffff) / 64));
+    sprintf(v, STR(@StrGesamtFrei),
+            FmtNum(t, SysGetInfo(SGIT_TOTAL_HANDLES)),
+            FmtNum(t2, SysGetInfo(SGIT_NUMBER_OF_FREE_HANDLES)));
+    RRow(STR(@StrHandles), v);
+    sprintf(v, STR(@StrProzesseBibliothekenTreiber),
+            SysGetInfo(SGIT_TOTAL_GEODES), SysGetInfo(SGIT_NUMBER_OF_PROCESSES),
+            SysGetInfo(SGIT_NUMBER_OF_LIBRARIES), SysGetInfo(SGIT_NUMBER_OF_DRIVERS));
+    RRow(STR(@StrGeladeneGeodes), v);
+    ReadIni(v, "system", "handles");
+    RRow(STR(@StrHandlesGEOSINI), v);
+    ReadIni(v, "diskswap", "file");
+    RRow(STR(@StrAuslagerungsdatei), v);
+    ReadIni(v, "diskswap", "size");
+    RRow(STR(@StrAuslagerungGroesse), v);
+
+    /* ================= Seite 4: Bildschirm ================= */
+    rPage = PG_BILDSCHIRM;
+    RHead(STR(@StrGEOSBildschirmtreiber));
+    ReadIni(v, "screen 0", "device");
+    RRow(STR(@StrGeraet), v);
+    ReadIni(v, "screen 0", "driver");
+    RRow(STR(@StrTreiber), v);
+    RRow(STR(@StrFarbmodus), ColorModeText());
+    sprintf(v, "%u x %u", screenW, screenH);
+    RRow(STR(@StrBildschirmGEOS), v);
+    RHead(STR(@StrGrafikkarte));
+    sprintf(v, "%Xh", hw.vmodeV);
+    RRow(STR(@StrVideomodus), v);
+    if (hw.miOk) {
+        sprintf(v, "%u x %u", hw.xres, hw.yres);
+        RRow(STR(@StrAufloesung), v);
+        RRow(STR(@StrFarbtiefe), DepthText(v, hw.bpp));
+    }
+    if (hw.vbe) {
+        sprintf(v, STR(@StrVBE), hw.vbeVer >> 8, hw.vbeVer & 0xff);
+        RRow(STR(@StrVESABIOS), v);
+        RRow(STR(@StrHerstellerOEM), hw.vbeOem[0] ? hw.vbeOem : "-");
+        if (hw.vbeVendor[0] || hw.vbeProduct[0]) {
+            sprintf(v, "%s / %s", hw.vbeVendor, hw.vbeProduct);
+            RRow(STR(@StrAnbieterProdukt), v);
+        }
+        RRow(STR(@StrVideospeicher), FmtKB(v, (dword) hw.vbeMem * 64));
+    } else {
+        RRow(STR(@StrVESABIOS), STR(@StrNichtVorhanden));
+    }
+    RHead(STR(@StrProgrammfenster));
+    sprintf(v, "%u x %u", winW, winH);
+    RRow(STR(@StrGroesse), v);
+    RRow(STR(@StrUrsprungImDokument), "0, 0");
+
+    /* ================= Seite 5: GEOS ================= */
+    rPage = PG_GEOS;
+    RHead(STR(@StrVersion));
+    RRow("FreeGEOS (Kernel)", GeodeVersion(v, "geos    "));
+    RRow("Benutzeroberfläche (UI)", GeodeVersion(v, "ui      "));
+    path = v;
+    v[0] = 0;
+    FileConstructFullPath(&path, VALUE_LEN, (DiskHandle) SP_TOP, "", TRUE);
+    RRow(STR(@StrGEOSVerzeichnis), v[0] ? v : STR(@StrUnbekannt));
+    RHead(STR(@StrOberflaeche));
+    ReadIni(v, "ui", "specific");
+    RRow(STR(@StrSpezifischeUI), v);
+    ReadIni(v, "system", "fontid");
+    RRow(STR(@StrSystemschrift), v);
+    ReadIni(v, "ui", "background");
+    RRow(STR(@StrHintergrund), v);
+    ReadIni(v, "ui", "execOnStartup");
+    RRow(STR(@StrAutostart), v);
+    RHead(STR(@StrGeraete));
+    ReadIni(v, "keyboard", "device");
+    RRow(STR(@StrTastatur), v);
+    ReadIni(v, "keyboard", "driver");
+    RRow(STR(@StrTastaturtreiber), v);
+    ReadIni(v, "mouse", "device");
+    RRow(STR(@StrMaus), v);
+    ReadIni(v, "mouse", "driver");
+    RRow(STR(@StrMaustreiber), v);
+    ReadIni(v, "printer", "count");
+    RRow(STR(@StrZahlDerDrucker), v);
+    ReadIni(v, "printer", "printers");
+    RRow(STR(@StrDrucker), v);
+    RRow(STR(@StrStiftModus), SysGetPenMode() ? STR(@StrJa) : STR(@StrNein));
+
+    /* ================= Seite 6: Leistung ================= */
+    rPage = PG_LEISTUNG;
+    RHead(STR(@StrProzessor));
+    RRow(STR(@StrSchleifenProSekunde), FmtNum(v, hw.loops));
+    RRow(STR(@StrGeschwindigkeitsindex), SpeedText(v));
+    if (benchDone) {
+        sprintf(v, STR(@StrGleitkommaWert), FmtNum(t, bFloat));
+        RRow(STR(@StrGleitkomma), v);
+    }
+    RHead(STR(@StrGrafikGEOSGrafiksystem));
+    if (benchDone) {
+        RRow(STR(@StrRechteckeGrFillRect), OpsText(v, bRect));
+        RRow(STR(@StrTexteGrDrawText), OpsText(v, bText));
+        RRow(STR(@StrEllipsenGrFillEllipse), OpsText(v, bEll));
+        RRow(STR(@StrBitmaps48x30GrDrawBitmap), OpsText(v, bBmp));
+        RHead(STR(@StrSpeicherUndDatei));
+        RRow(STR(@StrSpeicherbloeckeMemAlloc), OpsText(v, bMem));
+        sprintf(v, STR(@StrKBS), FmtNum(t, bFileW));
+        RRow(STR(@StrDateiSchreibenSTATE), v);
+        sprintf(v, STR(@StrKBS), FmtNum(t, bFileR));
+        RRow(STR(@StrDateiLesenSTATE), v);
+        RRow(STR(@StrStand), STR(@StrGemessenJeEtwa0));
+    } else {
+        RRow(STR(@StrStand), STR(@StrNochNichtGemessenKnopf));
+    }
+}
+
+#pragma code_seg("DrawCode")
+
+static word
+RowsOnPage(word page, word *first)
+{
+    word i, n = 0;
+    *first = 0;
+    for (i = 0; i < numRows; i++) {
+        if (rows[i].RR_page == page) {
+            if (!n) *first = i;
+            n++;
+        }
+    }
+    return n;
+}
+
+
+static word
+PageLines(word page)
+{
+    word first;
+    if (page < NUM_REPORT)     return RowsOnPage(page, &first);
+    if (page == PG_SCHRIFTEN)  return numFonts + numTtfMissing;
+    return 0;
+}
+
+static word
+VisRows(word page)
+{
+    return (page == PG_SCHRIFTEN) ? FONT_VIS_ROWS : VIS_ROWS;
+}
+
+/***********************************************************************
+ *              Zeichnen: Rahmen (Titel, Reiter, Fuss)
+ ***********************************************************************/
+
+static void
+SetFont(GStateHandle gs, FontID f, word size, Boolean bold)
+{
+    GrSetFont(gs, f, MakeWWFixed(size));
+    if (bold) GrSetTextStyle(gs, TS_BOLD, 0);
+    else      GrSetTextStyle(gs, 0, TS_BOLD | TS_ITALIC | TS_UNDERLINE |
+                                     TS_STRIKE_THRU | TS_OUTLINE);
+}
+
+static void
+DrawFrame(GStateHandle gs)
+{
+    word  i;
+    sword x;
+    const char *foot;
+
+    /* Titelleiste */
+    GrSetAreaColor(gs, CF_INDEX, C_BLUE, 0, 0);
+    GrFillRect(gs, 0, 0, PAGE_W, TITLE_H);
+    GrSetTextColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    SetFont(gs, FONT_SCREEN, 18, TRUE);
+    GrDrawText(gs, 10, 4, STR(@StrFreeGEOSTest), 0);
+    SetFont(gs, FONT_SCREEN, 10, FALSE);
+    GrDrawText(gs, 300, 10, STR(@StrSysteminformationUndVorfuehr), 0);
+    GrDrawBitmap(gs, PAGE_W - 52, 0, (const Bitmap *) iconBitmap, NULL);
+
+    /* Reiter */
+    GrSetAreaColor(gs, CF_INDEX, C_LIGHT_GRAY, 0, 0);
+    GrFillRect(gs, 0, TITLE_H, PAGE_W, BODY_TOP);
+    for (i = 0; i < NUM_TABS; i++) {
+        Boolean sel = (i == curPage);
+        x = (sword) (8 + i * TAB_W);
+        GrSetAreaColor(gs, CF_INDEX, sel ? C_WHITE : C_LIGHT_BLUE, 0, 0);
+        GrFillRect(gs, x, sel ? TAB_Y - 2 : TAB_Y, x + TAB_W - 2, BODY_TOP + 1);
+        GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        GrDrawRect(gs, x, sel ? TAB_Y - 2 : TAB_Y, x + TAB_W - 2, BODY_TOP + 1);
+        GrSetTextColor(gs, CF_INDEX, sel ? C_BLACK : C_WHITE, 0, 0);
+        SetFont(gs, FONT_SCREEN, 10, FALSE);
+        GrDrawText(gs, x + 6, TAB_Y + 4, tabNames[i], 0);
+    }
+
+    /* Inhaltsfeld */
+    GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrFillRect(gs, 8, BODY_TOP, PAGE_W - 8, BODY_BOTTOM);
+    GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawRect(gs, 8, BODY_TOP, PAGE_W - 8, BODY_BOTTOM);
+    if (curPage < NUM_TABS) {
+        /* Reiterunterkante oeffnen */
+        x = (sword) (8 + curPage * TAB_W);
+        GrSetLineColor(gs, CF_INDEX, C_WHITE, 0, 0);
+        GrDrawHLine(gs, x + 1, BODY_TOP, x + TAB_W - 3);
+    }
+
+    /* Fusszeile */
+    GrSetAreaColor(gs, CF_INDEX, C_LIGHT_GRAY, 0, 0);
+    GrFillRect(gs, 0, BODY_BOTTOM + 1, PAGE_W, PAGE_H);
+    foot = statusMsg ? statusMsg : footTexts[curPage];
+    GrSetTextColor(gs, CF_INDEX, statusMsg ? C_BLUE : C_BLACK, 0, 0);
+    SetFont(gs, FONT_SCREEN, 10, statusMsg != NULL);
+    GrDrawText(gs, 8, FOOT_Y, foot, 0);
+}
+
+/* Rollpfeile rechts im Inhaltsfeld */
+static void
+DrawScrollArrows(GStateHandle gs, word total)
+{
+    static const Point up[3]   = { {618, ROW_Y + 2}, {612, ROW_Y + 12}, {624, ROW_Y + 12} };
+    static const Point down[3] = { {612, BODY_BOTTOM - 16}, {624, BODY_BOTTOM - 16},
+                                   {618, BODY_BOTTOM - 6} };
+    word pos = scrollPos[curPage];
+    word vr = VisRows(curPage);
+
+    if (total <= vr) return;
+    GrSetAreaColor(gs, CF_INDEX, pos > 0 ? C_BLUE : C_LIGHT_GRAY, 0, 0);
+    GrFillPolygon(gs, ODD_EVEN, up, 3);
+    GrSetAreaColor(gs, CF_INDEX, pos + vr < total ? C_BLUE : C_LIGHT_GRAY, 0, 0);
+    GrFillPolygon(gs, ODD_EVEN, down, 3);
+}
+
+/***********************************************************************
+ *              Zeichnen: Berichtsseiten und Textseiten
+ ***********************************************************************/
+
+static void
+DrawRow(GStateHandle gs, const ReportRow *r, sword y)
+{
+    if (r->RR_kind == RK_HEAD) {
+        GrSetTextColor(gs, CF_INDEX, C_BLUE, 0, 0);
+        SetFont(gs, FONT_SCREEN, 12, TRUE);
+        GrDrawText(gs, 18, y, r->RR_label, 0);
+        GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        GrDrawHLine(gs, 18, y + 14, PAGE_W - 20);
+    } else {
+        GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        SetFont(gs, FONT_SCREEN, 10, FALSE);
+        GrDrawText(gs, 24, y + 1, r->RR_label, 0);
+        GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+        SetFont(gs, FONT_SCREEN, 10, TRUE);
+        GrDrawText(gs, VALUE_X, y + 1, r->RR_value, 0);
+    }
+}
+
+static void
+DrawReportPage(GStateHandle gs, word page, word maxRows)
+{
+    word first, n, i, pos;
+    sword y = ROW_Y;
+
+    n = RowsOnPage(page, &first);
+    pos = scrollPos[page];
+    if (pos + maxRows > n) pos = (n > maxRows) ? n - maxRows : 0;
+    scrollPos[page] = pos;
+    for (i = pos; i < n && i < pos + maxRows; i++) {
+        DrawRow(gs, &rows[first + i], y);
+        y += ROW_H;
+    }
+    DrawScrollArrows(gs, n);
+}
+
+
+/***********************************************************************
+ *              Zeichnen: Leistung
+ ***********************************************************************/
+
+static void
+TestArea(word *top, word *bottom)
+{
+    word first, n = RowsOnPage(PG_LEISTUNG, &first);
+    *top = ROW_Y + n * ROW_H + 8;
+    *bottom = BTN_TOP - 8;
+    if (*top > *bottom - 40) *top = *bottom - 40;
+}
+
+static void
+DrawButton(GStateHandle gs, const char *text, Boolean pressed)
+{
+    GrSetAreaColor(gs, CF_INDEX, pressed ? C_BLUE : C_LIGHT_BLUE, 0, 0);
+    GrFillRoundRect(gs, BTN_LEFT, BTN_TOP, BTN_RIGHT, BTN_BOTTOM, 5);
+    GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawRoundRect(gs, BTN_LEFT, BTN_TOP, BTN_RIGHT, BTN_BOTTOM, 5);
+    GrSetTextColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    SetFont(gs, FONT_SCREEN, 11, TRUE);
+    GrDrawText(gs, BTN_LEFT + 14, BTN_TOP + 4, text, 0);
+}
+
+static void
+DrawLeistungPage(GStateHandle gs)
+{
+    word top, bottom;
+
+    DrawReportPage(gs, PG_LEISTUNG, VIS_ROWS - 3);
+    TestArea(&top, &bottom);
+    GrSetLineColor(gs, CF_INDEX, C_LIGHT_GRAY, 0, 0);
+    GrDrawRect(gs, 20, top, PAGE_W - 20, bottom);
+    DrawButton(gs, STR(@StrJetztMessenM), FALSE);
+}
+
+/***********************************************************************
+ *              Zeichnen: Grafik
+ ***********************************************************************/
+
+/* 1-Bit-Bitmap 32x16 (Schachbrett/Rahmen) und 24-Bit-Feld 96x30 */
+static byte bmp1[6 + 4 * 16];
+static byte bmp24[6 + 96 * 3 * 10];
+
+static void
+MakeBitmaps(void)
+{
+    word x, y;
+    Bitmap *b = (Bitmap *) bmp1;
+
+    b->B_width = 32; b->B_height = 16;
+    b->B_compact = BMC_UNCOMPACTED; b->B_type = BMF_MONO;
+    for (y = 0; y < 16; y++) {
+        for (x = 0; x < 4; x++) {
+            byte v = ((y / 4 + x) & 1) ? 0xf0 : 0x0f;
+            if (y == 0 || y == 15) v = 0xff;
+            if (x == 0) v |= 0x80;
+            if (x == 3) v |= 0x01;
+            bmp1[6 + y * 4 + x] = v;
+        }
+    }
+    b = (Bitmap *) bmp24;
+    b->B_width = 96; b->B_height = 10;
+    b->B_compact = BMC_UNCOMPACTED; b->B_type = BMF_24BIT;
+    for (y = 0; y < 10; y++) {
+        for (x = 0; x < 96; x++) {
+            byte *p = bmp24 + 6 + (y * 96 + x) * 3;
+            p[0] = (byte) (x * 255 / 95);           /* rot   */
+            p[1] = (byte) (y * 25);                 /* gruen */
+            p[2] = (byte) (255 - x * 255 / 95);     /* blau  */
+        }
+    }
+}
+
+static void
+GTitle(GStateHandle gs, sword x, sword y, const char *s)
+{
+    GrSetTextColor(gs, CF_INDEX, C_BLUE, 0, 0);
+    SetFont(gs, FONT_SCREEN, 11, TRUE);
+    GrDrawText(gs, x, y, s, 0);
+}
+
+static void
+DrawGrafikPage(GStateHandle gs)
+{
+    word  i;
+    sword x, y;
+    static const word maskIds[18] = { 0,1,2,3,4,5,6,7,8,9, 25,33,41,49,57,65,73,81 };
+    static const Point star[10] = {
+        {560, 112}, {568, 132}, {590, 133}, {573, 146}, {579, 168},
+        {560, 155}, {541, 168}, {547, 146}, {530, 133}, {552, 132}
+    };
+
+    /* 16 Systemfarben */
+    GTitle(gs, 18, 64, STR(@Str16Systemfarben));
+    for (i = 0; i < 16; i++) {
+        x = (sword) (18 + i * 18);
+        GrSetAreaColor(gs, CF_INDEX, i, 0, 0);
+        GrFillRect(gs, x, 80, x + 16, 96);
+        GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+        GrDrawRect(gs, x, 80, x + 16, 96);
+    }
+
+    /* RGB-Verlaeufe */
+    GTitle(gs, 18, 102, STR(@StrRGBVerlaeufeCFRGB));
+    for (i = 0; i < 64; i++) {
+        word v = i * 4 + 3;
+        x = (sword) (18 + i * 4);
+        GrSetAreaColor(gs, CF_RGB, v, 0, 0);   GrFillRect(gs, x, 118, x + 4, 126);
+        GrSetAreaColor(gs, CF_RGB, 0, v, 0);   GrFillRect(gs, x, 126, x + 4, 134);
+        GrSetAreaColor(gs, CF_RGB, 0, 0, v);   GrFillRect(gs, x, 134, x + 4, 142);
+        GrSetAreaColor(gs, CF_RGB, v, v, v);   GrFillRect(gs, x, 142, x + 4, 150);
+    }
+
+    /* Formen */
+    GTitle(gs, 330, 64, STR(@StrRechteckeFlaechenEllipsen));
+    GrSetAreaColor(gs, CF_INDEX, C_LIGHT_RED, 0, 0);
+    GrFillRect(gs, 330, 82, 370, 112);
+    GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    GrDrawRect(gs, 330, 82, 370, 112);
+    GrSetAreaColor(gs, CF_INDEX, C_LIGHT_GREEN, 0, 0);
+    GrFillRoundRect(gs, 380, 82, 420, 112, 8);
+    GrSetAreaColor(gs, CF_INDEX, C_LIGHT_CYAN, 0, 0);
+    GrFillEllipse(gs, 430, 82, 480, 112);
+    GrDrawEllipse(gs, 430, 82, 480, 112);
+    GrSetAreaColor(gs, CF_INDEX, C_YELLOW, 0, 0);
+    GrFillArc(gs, 490, 80, 524, 114, 30, 330, ACT_PIE);
+    GrDrawArc(gs, 490, 80, 524, 114, 30, 330, ACT_PIE);
+    GrSetAreaColor(gs, CF_INDEX, C_VIOLET, 0, 0);
+    GrFillPolygon(gs, ODD_EVEN, star, 10);
+    for (i = 1; i <= 4; i++) {
+        GrSetLineWidth(gs, MakeWWFixed(i));
+        GrSetLineColor(gs, CF_INDEX, i, 0, 0);
+        GrDrawLine(gs, 330, (sword) (120 + i * 8), 420, (sword) (120 + i * 8));
+    }
+    GrSetLineWidth(gs, MakeWWFixed(1));
+    GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    GrSetLineStyle(gs, LS_DASHED, 0, NULL, 0);
+    GrDrawLine(gs, 430, 132, 520, 132);
+    GrSetLineStyle(gs, LS_DOTTED, 0, NULL, 0);
+    GrDrawLine(gs, 430, 146, 520, 146);
+    GrSetLineStyle(gs, LS_SOLID, 0, NULL, 0);
+
+    /* Fuellmuster */
+    GTitle(gs, 18, 160, STR(@StrFuellmusterGrSetAreaMaskSys));
+    for (i = 0; i < 18; i++) {
+        x = (sword) (18 + i * 33);
+        GrSetAreaColor(gs, CF_INDEX, C_BLUE, 0, 0);
+        GrSetAreaMaskSys(gs, maskIds[i]);
+        GrFillRect(gs, x, 176, x + 28, 200);
+        GrSetAreaMaskSys(gs, SDM_100);
+        GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        GrDrawRect(gs, x, 176, x + 28, 200);
+    }
+
+    /* Schriften und Stile */
+    GTitle(gs, 18, 208, STR(@StrSchriftenUndStile));
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    SetFont(gs, FID_DTC_URW_ROMAN, 14, FALSE);
+    GrDrawText(gs, 18, 226, "URW Roman 14", 0);
+    SetFont(gs, FID_DTC_URW_SANS, 14, FALSE);
+    GrDrawText(gs, 140, 226, "URW Sans 14", 0);
+    SetFont(gs, FID_DTC_URW_MONO, 12, FALSE);
+    GrDrawText(gs, 260, 228, "URW Mono 12", 0);
+    SetFont(gs, FID_BERKELEY, 10, FALSE);
+    GrDrawText(gs, 380, 230, "Berkeley 10", 0);
+    SetFont(gs, FID_ESQUIRE, 12, FALSE);
+    GrDrawText(gs, 480, 228, "Esquire 12", 0);
+    SetFont(gs, FONT_SCREEN, 12, FALSE);
+    y = 250;
+    GrSetTextStyle(gs, TS_BOLD, 0);        GrDrawText(gs, 18, y, STR(@StrFett), 0);
+    GrSetTextStyle(gs, TS_ITALIC, TS_BOLD); GrDrawText(gs, 70, y, STR(@StrKursiv), 0);
+    GrSetTextStyle(gs, TS_UNDERLINE, TS_ITALIC);
+    GrDrawText(gs, 130, y, STR(@StrUnterstrichen), 0);
+    GrSetTextStyle(gs, TS_STRIKE_THRU, TS_UNDERLINE);
+    GrDrawText(gs, 240, y, STR(@StrDurchgestrichen), 0);
+    GrSetTextStyle(gs, TS_OUTLINE, TS_STRIKE_THRU);
+    GrDrawText(gs, 370, y, STR(@StrUmriss), 0);
+    GrSetTextStyle(gs, 0, TS_OUTLINE);
+    SetFont(gs, FID_DTC_URW_ROMAN, 24, TRUE);
+    GrSetTextColor(gs, CF_RGB, 200, 0, 120);
+    GrDrawText(gs, 450, 242, STR(@StrGross24), 0);
+
+    /* gedrehter Text */
+    SetFont(gs, FONT_SCREEN, 10, FALSE);
+    for (i = 0; i < 8; i++) {
+        GrSaveState(gs);
+        GrApplyTranslation(gs, MakeWWFixed(560), MakeWWFixed(340));
+        GrApplyRotation(gs, MakeWWFixed(i * 45));
+        GrSetTextColor(gs, CF_INDEX, i + 1, 0, 0);
+        GrDrawText(gs, 6, -5, "FreeGEOS", 0);
+        GrRestoreState(gs);
+    }
+
+    /* Bitmaps */
+    GTitle(gs, 18, 282, STR(@StrBitmapsGrDrawBitmap));
+    GrDrawBitmap(gs, 18, 300, (const Bitmap *) iconBitmap, NULL);
+    SetFont(gs, FONT_SCREEN, 9, FALSE);
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    GrDrawText(gs, 18, 334, STR(@Str4BitMaske), 0);
+    GrDrawBitmap(gs, 130, 308, (const Bitmap *) bmp24, NULL);
+    GrDrawText(gs, 130, 334, STR(@Str24BitNurEchtfarben), 0);
+    GrSetAreaColor(gs, CF_INDEX, C_RED, 0, 0);
+    GrFillBitmap(gs, 280, 306, (const Bitmap *) bmp1, NULL);
+    GrDrawText(gs, 280, 334, STR(@Str1Bit), 0);
+
+    /* Zeichensatz */
+    GTitle(gs, 18, 354, STR(@StrZeichensatz));
+    SetFont(gs, FONT_SCREEN, 12, FALSE);
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    GrDrawText(gs, 18, 372, "ÄÖÜ äöü ß € © ° « » … – Ç É ñ å ø", 0);
+}
+
+/***********************************************************************
+ *              Zeichnen: Eingabe
+ ***********************************************************************/
+
+#pragma code_seg("InputCode")
+
+static void
+KeyName(char *buf, word ch)
+{
+    byte lo = (byte) ch;
+    if ((ch >> 8) == CS_CONTROL) {
+        switch (lo) {
+            case VC_ESCAPE:   strcpy(buf, "Esc"); return;
+            case VC_UP:       strcpy(buf, STR(@StrHoch)); return;
+            case VC_DOWN:     strcpy(buf, STR(@StrRunter)); return;
+            case VC_PREVIOUS: strcpy(buf, STR(@StrBildHoch)); return;
+            case VC_NEXT:     strcpy(buf, STR(@StrBildRunter)); return;
+            case VC_HOME:     strcpy(buf, "Pos1"); return;
+            case VC_END:      strcpy(buf, STR(@StrEnde)); return;
+            case 0x0d:        strcpy(buf, "Enter"); return;
+            case 0x09:        strcpy(buf, "Tab"); return;
+            case 0x08:        strcpy(buf, STR(@StrRueck)); return;
+            default:
+                if ((lo >= '0' && lo <= '9') || lo == '*' || lo == '+' ||
+                    lo == '-' || lo == '/' || lo == '.') {
+                    sprintf(buf, "Num %c", lo);      /* Ziffernblock */
+                } else if (lo >= VC_F1 && lo < VC_F1 + 12) {
+                    sprintf(buf, "F%u", lo - VC_F1 + 1);
+                } else {
+                    sprintf(buf, STR(@StrStrgH), lo);
+                }
+                return;
+        }
+    }
+    if (lo == ' ') { strcpy(buf, STR(@StrLeer)); return; }
+    if (lo >= ' ') { buf[0] = '\''; buf[1] = (char) lo; buf[2] = '\''; buf[3] = 0; return; }
+    sprintf(buf, "%02Xh", lo);
+}
+
+static void
+DrawKeys(GStateHandle gs)
+{
+    word  i;
+    sword y;
+    char  b[40], n[16];
+
+    GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrFillRect(gs, 12, ROW_Y, 318, BODY_BOTTOM - 2);
+    GTitle(gs, 18, ROW_Y, STR(@StrTastaturMSGMETAKBD));
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    SetFont(gs, FONT_SCREEN, 10, FALSE);
+    GrDrawText(gs, 18, ROW_Y + 20, STR(@StrLetzteTastenNeuesteOben), 0);
+    SetFont(gs, FID_DTC_URW_MONO, 10, TRUE);
+    GrDrawText(gs, 18, ROW_Y + 38, "Nr.   Zeichen       CX     DL/DH", 0);
+    GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawHLine(gs, 18, ROW_Y + 52, 310);
+    SetFont(gs, FID_DTC_URW_MONO, 10, FALSE);
+    if (!numKeys) {
+        SetFont(gs, FONT_SCREEN, 10, FALSE);
+        GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        GrDrawText(gs, 18, ROW_Y + 58, STR(@StrNochKeineTasteGedrueckt), 0);
+        return;
+    }
+    for (i = 0; i < numKeys; i++) {
+        const KeyEntry *k = &keys[i];
+        y = (sword) (ROW_Y + 58 + i * 15);
+        KeyName(n, k->KE_char);
+        sprintf(b, "%4u  %-12s  %04Xh  %02X/%02X", k->KE_nr, n,
+                k->KE_char, k->KE_flags & 0xff, k->KE_flags >> 8);
+        GrDrawText(gs, 18, y, b, 0);
+    }
+}
+
+static void
+DrawMouseValues(GStateHandle gs)
+{
+    char  b[40];
+    sword y = ROW_Y + 20;
+
+    GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrFillRect(gs, 324, ROW_Y + 18, PAGE_W - 12, PAD_TOP - 22);
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+
+#define MV(label, val) \
+    SetFont(gs, FONT_SCREEN, 10, FALSE); \
+    GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0); \
+    GrDrawText(gs, 330, y, label, 0); \
+    SetFont(gs, FONT_SCREEN, 10, TRUE); \
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0); \
+    GrDrawText(gs, 460, y, val, 0); \
+    y += ROW_H;
+
+    sprintf(b, "%d, %d", mouseX, mouseY);
+    MV(STR(@StrPosition), b);
+    sprintf(b, "%u", clicks);
+    MV(STR(@StrKlicks), b);
+    if (clickX >= 0) sprintf(b, "%d, %d", clickX, clickY);
+    else strcpy(b, "-");
+    MV(STR(@StrLetzterKlick), b);
+    sprintf(b, "%04Xh%s", lastBP,
+            (lastBP & BI_B0_DOWN) ? STR(@StrGedrueckt) : "");
+    MV(STR(@StrTastenBP), b);
+    sprintf(b, "%u", ends);
+    MV(STR(@StrLosgelassenEND), b);
+    sprintf(b, "%u", drags);
+    MV(STR(@StrZiehenDRAG), b);
+    sprintf(b, STR(@StrMausradWert), wheelCount, wheelSum);
+    MV(STR(@StrMausrad), b);
+#undef MV
+}
+
+static void
+DrawStrokes(GStateHandle gs)
+{
+    word i;
+    GrSetLineColor(gs, CF_INDEX, C_BLUE, 0, 0);
+    GrSetLineWidth(gs, MakeWWFixed(3));
+    for (i = 1; i < numPoints; i++) {
+        if (points[i].SP_x == STROKE_BREAK || points[i - 1].SP_x == STROKE_BREAK) {
+            continue;
+        }
+        GrDrawLine(gs, points[i - 1].SP_x, points[i - 1].SP_y,
+                   points[i].SP_x, points[i].SP_y);
+    }
+    GrSetLineWidth(gs, MakeWWFixed(1));
+}
+
+static void
+DrawEingabePage(GStateHandle gs)
+{
+    GrSetLineColor(gs, CF_INDEX, C_LIGHT_GRAY, 0, 0);
+    GrDrawVLine(gs, 320, ROW_Y, BODY_BOTTOM - 6);
+    DrawKeys(gs);
+    GTitle(gs, 330, ROW_Y, STR(@StrMausEigenesVisObjekt));
+    DrawMouseValues(gs);
+    SetFont(gs, FONT_SCREEN, 10, FALSE);
+    GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+    GrDrawText(gs, PAD_LEFT, PAD_TOP - 16,
+               STR(@StrMalflaecheMitGedrueckterMaus), 0);
+    GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrFillRect(gs, PAD_LEFT, PAD_TOP, PAD_RIGHT, PAD_BOTTOM);
+    GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawRect(gs, PAD_LEFT - 1, PAD_TOP - 1, PAD_RIGHT + 1, PAD_BOTTOM + 1);
+    GrSaveState(gs);
+    GrSetClipRect(gs, PCT_REPLACE, PAD_LEFT, PAD_TOP, PAD_RIGHT, PAD_BOTTOM);
+    DrawStrokes(gs);
+    GrRestoreState(gs);
+}
+
+
+#pragma code_seg("PageCode")
+
+/***********************************************************************
+ *              Seite Schriften (GrEnumFonts)
+ ***********************************************************************/
+
+#define FONT_EXTRA(fe)  ((FontExtra *) ((fe) + MAX_FONT_LIST))
+#define TTF_MISSING(fe) ((TtfMissing *) (FONT_EXTRA(fe) + MAX_FONT_LIST))
+
+/*
+ * Bitmapgroessen aus den Schriftdateien im Ordner FONT lesen.
+ * Kopf einer .FNT-Datei: "BSWF", Font-ID bei 8, Groessentabelle von
+ * 6 + [21h] bis 6 + [23h], je Eintrag 10 Bytes: Stil, Groesse (WBFixed).
+ */
+static void
+ReadFontSizes(FontEnumStruct *fe)
+{
+    FileEnumParams fep;
+    MemHandle      nameBlock = NullHandle;
+    word           numNoFit, numFiles, i, k, len, ps, pe, off, sz, id;
+    char          *names;
+    FileHandle     fh;
+    byte           hdr[256];
+    FontExtra     *fx = FONT_EXTRA(fe);
+
+    FilePushDir();
+    FileSetStandardPath(SP_FONT);
+    memset(&fep, 0, sizeof(fep));
+    fep.FEP_searchFlags = FESF_NON_GEOS;
+    fep.FEP_returnAttrs = (void *) FESRT_NAME;
+    fep.FEP_returnSize  = sizeof(FileLongName);
+    fep.FEP_bufSize     = 64;
+    numFiles = FileEnum(&fep, &nameBlock, &numNoFit);
+    if (nameBlock) {
+        names = (char *) MemLock(nameBlock);
+        for (i = 0; i < numFiles; i++) {
+            char *nm = names + i * sizeof(FileLongName);
+            len = strlen(nm);
+            if (len < 5 || Lower(nm[len - 1]) != 't' || Lower(nm[len - 2]) != 'n' ||
+                Lower(nm[len - 3]) != 'f' || nm[len - 4] != '.') {
+                continue;
+            }
+            fh = FileOpen(nm, FILE_ACCESS_R | FILE_DENY_NONE);
+            if (!fh) continue;
+            len = FileRead(fh, hdr, sizeof(hdr), FALSE);
+            FileClose(fh, FALSE);
+            if (len < 0x30 || memcmp(hdr, "BSWF", 4) != 0) continue;
+            id = *(word *) (hdr + 8);
+            ps = *(word *) (hdr + 0x21) + 6;
+            pe = *(word *) (hdr + 0x23) + 6;
+            for (k = 0; k < numFonts; k++) {
+                if (fe[k].FES_ID == id) break;
+            }
+            if (k == numFonts) continue;
+            strncpy(fx[k].FX_file, nm, 13);
+            for (off = ps; off + 10 <= pe && off + 4 <= len; off += 10) {
+                word j;
+                if (hdr[off] != 0) continue;            /* nur Grundschnitt */
+                sz = hdr[off + 2];
+                for (j = 0; j < fx[k].FX_numSizes && fx[k].FX_sizes[j] != sz; j++) ;
+                if (j == fx[k].FX_numSizes && j < MAX_FONT_SIZES) {
+                    /* aufsteigend einsortieren */
+                    while (j > 0 && fx[k].FX_sizes[j - 1] > sz) {
+                        fx[k].FX_sizes[j] = fx[k].FX_sizes[j - 1];
+                        j--;
+                    }
+                    fx[k].FX_sizes[j] = (byte) sz;
+                    fx[k].FX_numSizes++;
+                }
+            }
+        }
+        MemUnlock(nameBlock);
+        MemFree(nameBlock);
+    }
+    FilePopDir();
+}
+
+
+/*
+ * TrueType-Schriften (FreeGEOS-TrueType-Treiber truetype.drvr).
+ * Der Treiber laedt alle Dateien aus FONT\TTF und nimmt als Schriftnamen
+ * den Familiennamen (Name-ID 1) aus der Namenstabelle der Datei - genau
+ * so lesen wir ihn hier, um Datei und Schrift einander zuzuordnen.
+ */
+static word BE16(const byte *p) { return ((word) p[0] << 8) | p[1]; }
+static dword BE32(const byte *p)
+{
+    return ((dword) BE16(p) << 16) | BE16(p + 2);
+}
+
+static Boolean
+SameName(const char *a, const char *b)
+{
+    while (*a && Lower(*a) == Lower(*b)) { a++; b++; }
+    return (*a == 0 && *b == 0);
+}
+
+/* Familiennamen (Name-ID 1) aus einer TrueType-Datei lesen */
+static Boolean
+TtfFamilyName(FileHandle fh, char *out, word max)
+{
+    byte  buf[16], str[64];
+    word  numTables, i, count, strOff, best = 0xffff, bestRank = 0;
+    word  plat = 0, len = 0, soff = 0, n;
+    dword nameOff = 0;
+
+    if (FileRead(fh, buf, 12, FALSE) != 12) return FALSE;
+    numTables = BE16(buf + 4);
+    if (numTables > 64) return FALSE;
+    for (i = 0; i < numTables; i++) {
+        if (FileRead(fh, buf, 16, FALSE) != 16) return FALSE;
+        if (memcmp(buf, "name", 4) == 0) {
+            nameOff = BE32(buf + 8);
+            break;
+        }
+    }
+    if (!nameOff) return FALSE;
+    FilePos(fh, nameOff, FILE_POS_START);
+    if (FileRead(fh, buf, 6, FALSE) != 6) return FALSE;
+    count  = BE16(buf + 2);
+    strOff = BE16(buf + 4);
+    if (count > 400) count = 400;
+    for (i = 0; i < count; i++) {
+        word p, e, l, rank;
+        if (FileRead(fh, buf, 12, FALSE) != 12) break;
+        if (BE16(buf + 6) != 1) continue;           /* nur Familienname */
+        p = BE16(buf); e = BE16(buf + 2); l = BE16(buf + 4);
+        /* Reihenfolge wie im Treiber: Windows/Englisch, Mac/Roman, Unicode */
+        if (p == 3 && e == 1 && l == 0x409)      rank = 3;
+        else if (p == 1 && e == 0 && l == 0)     rank = 2;
+        else if (p == 0 || p == 3)               rank = 1;
+        else                                     continue;
+        if (rank > bestRank) {
+            bestRank = rank;
+            best = i;
+            plat = p;
+            len  = BE16(buf + 8);
+            soff = BE16(buf + 10);
+        }
+    }
+    if (best == 0xffff) return FALSE;
+    if (len > sizeof(str)) len = sizeof(str);
+    FilePos(fh, nameOff + strOff + soff, FILE_POS_START);
+    len = FileRead(fh, str, len, FALSE);
+    n = 0;
+    if (plat == 1) {
+        for (i = 0; i < len && n < max - 1; i++) out[n++] = (char) str[i];
+    } else {
+        for (i = 1; i < len && n < max - 1; i += 2) out[n++] = (char) str[i];
+    }
+    out[n] = 0;
+    return (n > 0);
+}
+
+static void
+ReadTrueTypeFonts(FontEnumStruct *fe)
+{
+    FileEnumParams fep;
+    MemHandle      nameBlock = NullHandle;
+    word           numNoFit, numFiles, i, k;
+    char          *names, family[32];
+    FileHandle     fh;
+    FontExtra     *fx = FONT_EXTRA(fe);
+    TtfMissing    *tm = TTF_MISSING(fe);
+
+    ttfDriver = (GeodeFind("truetype", GEODE_NAME_SIZE, 0, 0) != NullHandle);
+    numTtfFiles = numTtfMissing = 0;
+
+    FilePushDir();
+    if (FileSetCurrentPath(SP_FONT, "TTF")) {
+        memset(&fep, 0, sizeof(fep));
+        fep.FEP_searchFlags = FESF_NON_GEOS;
+        fep.FEP_returnAttrs = (void *) FESRT_NAME;
+        fep.FEP_returnSize  = sizeof(FileLongName);
+        fep.FEP_bufSize     = 120;
+        numFiles = FileEnum(&fep, &nameBlock, &numNoFit);
+        if (nameBlock) {
+            names = (char *) MemLock(nameBlock);
+            for (i = 0; i < numFiles; i++) {
+                char   *nm = names + i * sizeof(FileLongName);
+                Boolean ok;
+                fh = FileOpen(nm, FILE_ACCESS_R | FILE_DENY_NONE);
+                if (!fh) continue;
+                ok = TtfFamilyName(fh, family, sizeof(family));
+                FileClose(fh, FALSE);
+                if (!ok) continue;                  /* keine TrueType-Datei */
+                numTtfFiles++;
+                for (k = 0; k < numFonts; k++) {
+                    if (SameName(fe[k].FES_name, family)) break;
+                }
+                if (k < numFonts) {
+                    if (!fx[k].FX_ttfFiles) {
+                        strcpy(fx[k].FX_file, "TTF\\");
+                        strncat(fx[k].FX_file, nm, 13);
+                    }
+                    fx[k].FX_ttfFiles++;
+                } else if (numTtfMissing < MAX_TTF_MISSING) {
+                    strncpy(tm[numTtfMissing].TM_file, nm, 13);
+                    strcpy(tm[numTtfMissing].TM_family, family);
+                    numTtfMissing++;
+                }
+            }
+            MemUnlock(nameBlock);
+            MemFree(nameBlock);
+        }
+    }
+    FilePopDir();
+}
+
+static void
+LoadFonts(void)
+{
+    FontEnumStruct *fe;
+    word            i;
+
+    if (fontBlock) return;
+    fontBlock = MemAlloc(MAX_FONT_LIST * (sizeof(FontEnumStruct) + sizeof(FontExtra)) +
+                         MAX_TTF_MISSING * sizeof(TtfMissing),
+                         HF_SWAPABLE, HAF_ZERO_INIT);
+    if (!fontBlock) return;
+    fe = (FontEnumStruct *) MemLock(fontBlock);
+    /* FEF_OUTLINES oder FEF_BITMAPS ist Pflicht (EC-Kernel prueft das) */
+    numFonts = GrEnumFonts(fe, MAX_FONT_LIST,
+                           FEF_ALPHABETIZE | FEF_OUTLINES | FEF_BITMAPS, 0);
+    for (i = 0; i < numFonts; i++) {
+        FONT_EXTRA(fe)[i].FX_outline =
+            (GrCheckFontAvailID(FEF_OUTLINES, 0, fe[i].FES_ID) != FID_INVALID);
+    }
+    ReadFontSizes(fe);
+    ReadTrueTypeFonts(fe);
+    MemUnlock(fontBlock);
+}
+
+/* Bitmapgroesse waehlen, die der gewuenschten Bildschirmgroesse am naechsten liegt */
+static word
+PickBitmapSize(const FontExtra *fx, word want)
+{
+    word j, best = 0, bestDiff = 0xffff;
+    for (j = 0; j < fx->FX_numSizes; j++) {
+        word d = (fx->FX_sizes[j] > want) ? fx->FX_sizes[j] - want
+                                          : want - fx->FX_sizes[j];
+        if (d < bestDiff) {
+            bestDiff = d;
+            best = fx->FX_sizes[j];
+        }
+    }
+    return best;
+}
+
+/* Art der Schrift aus dem Hersteller-Teil der Font-ID */
+static const char *
+FontMakerText(FontID id, const FontExtra *fx)
+{
+    switch (id & 0xf000) {
+        case FM_TRUETYPE:  return STR(@StrTrueType);
+        case FM_NIMBUSQ:   return STR(@StrNimbusUmriss);
+        case FM_BITSTREAM: return "Bitstream";
+        case FM_ADOBE:     return "Adobe";
+        case FM_AGFA:      return "Agfa";
+        default:
+            return fx->FX_outline ? STR(@StrSchriftUmriss) : STR(@StrBitmapSchrift);
+    }
+}
+
+static void
+DrawFontsPage(GStateHandle gs)
+{
+    FontEnumStruct *fe;
+    FontExtra      *fx;
+    TtfMissing     *tm;
+    word  i, pos, vr = FONT_VIS_ROWS, total;
+    sword y;
+    char  b[72];
+
+    LoadFonts();
+    total = numFonts + numTtfMissing;
+    sprintf(b, STR(@StrInstallierteSchriften), numFonts);
+    GrSetTextColor(gs, CF_INDEX, C_BLUE, 0, 0);
+    SetFont(gs, FONT_SCREEN, 12, TRUE);
+    GrDrawText(gs, 18, ROW_Y, b, 0);
+    sprintf(b, STR(@StrTrueTypeTreiberInfo),
+            ttfDriver ? STR(@StrGeladen) : STR(@StrNichtGeladen), numTtfFiles);
+    SetFont(gs, FONT_SCREEN, 10, FALSE);
+    GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawText(gs, 250, ROW_Y + 2, b, 0);
+    GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawHLine(gs, 18, ROW_Y + 16, PAGE_W - 30);
+    if (!total || !fontBlock) {
+        SetFont(gs, FONT_SCREEN, 10, FALSE);
+        GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        GrDrawText(gs, 24, FONT_LIST_Y, STR(@StrKeineSchriften), 0);
+        return;
+    }
+    pos = scrollPos[PG_SCHRIFTEN];
+    if (pos + vr > total) pos = (total > vr) ? total - vr : 0;
+    scrollPos[PG_SCHRIFTEN] = pos;
+
+    fe = (FontEnumStruct *) MemLock(fontBlock);
+    tm = TTF_MISSING(fe);
+    y = FONT_LIST_Y;
+    for (i = pos; i < total && i < pos + vr; i++) {
+        if ((i - pos) & 1) {
+            GrSetAreaColor(gs, CF_INDEX, C_LIGHT_GRAY, 0, 0);
+            GrSetAreaMaskSys(gs, SDM_25);
+            GrFillRect(gs, 14, y - 2, PAGE_W - 30, y + FONT_ROW_H - 3);
+            GrSetAreaMaskSys(gs, SDM_100);
+        }
+        if (i >= numFonts) {
+            /* TrueType-Datei, die FreeGEOS nicht geladen hat */
+            const TtfMissing *m = &tm[i - numFonts];
+            GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+            SetFont(gs, FONT_SCREEN, 10, TRUE);
+            GrDrawText(gs, 22, y + 3, m->TM_family, 0);
+            SetFont(gs, FONT_SCREEN, 10, FALSE);
+            sprintf(b, "TTF\\%s", m->TM_file);
+            GrDrawText(gs, 150, y + 3, b, 0);
+            GrSetTextColor(gs, CF_INDEX, C_RED, 0, 0);
+            GrDrawText(gs, 304, y + 3, STR(@StrTtfNichtGeladen), 0);
+            y += FONT_ROW_H;
+            continue;
+        }
+        GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+        SetFont(gs, FONT_SCREEN, 10, TRUE);
+        GrDrawText(gs, 22, y + 3, fe[i].FES_name, 0);
+        fx = &FONT_EXTRA(fe)[i];
+        SetFont(gs, FONT_SCREEN, 10, FALSE);
+        if (fx->FX_ttfFiles > 1) {
+            sprintf(b, "%s +%u", fx->FX_file, fx->FX_ttfFiles - 1);
+        } else {
+            strcpy(b, fx->FX_file[0] ? fx->FX_file : "-");
+        }
+        GrDrawText(gs, 150, y + 3, b, 0);
+        sprintf(b, "%u (%04Xh)", fe[i].FES_ID, fe[i].FES_ID);
+        GrDrawText(gs, 248, y + 3, b, 0);
+        GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+        strcpy(b, FontMakerText(fe[i].FES_ID, fx));
+        if (!fx->FX_outline) {
+            word j;
+            for (j = 0; j < fx->FX_numSizes; j++) {
+                sprintf(b + strlen(b), "%c%u", j ? '/' : ' ', fx->FX_sizes[j]);
+            }
+        }
+        GrDrawText(gs, 318, y + 3, b, 0);
+        /* Muster in der Schrift selbst */
+        GrSaveState(gs);
+        GrSetClipRect(gs, PCT_REPLACE, 424, y - 2, PAGE_W - 34, y + FONT_ROW_H - 3);
+        GrSetTextColor(gs, CF_INDEX, C_BLUE, 0, 0);
+        if (!fx->FX_outline && fx->FX_numSizes) {
+            /* Bitmapschrift: nur vorhandene Groessen, daher die Skalierung
+             * der Seite aufheben und die Groesse in Bildpunkten waehlen */
+            word want = (word) ((14L * gScale) >> 16);
+            word sz = PickBitmapSize(fx, want);
+            GrApplyTranslation(gs, MakeWWFixed(428), MakeWWFixed(y));
+            GrApplyScale(gs, (WWFixedAsDWord) (0xFFFFFFFFL / gScale),
+                             (WWFixedAsDWord) (0xFFFFFFFFL / gScale));
+            GrSetFont(gs, fe[i].FES_ID, MakeWWFixed(sz));
+            GrSetTextStyle(gs, 0, TS_BOLD);
+            GrDrawText(gs, 0, 0, STR(@StrSchriftMuster), 0);
+        } else {
+            GrSetFont(gs, fe[i].FES_ID, MakeWWFixed(14));
+            GrSetTextStyle(gs, 0, TS_BOLD);
+            GrDrawText(gs, 428, y, STR(@StrSchriftMuster), 0);
+        }
+        GrRestoreState(gs);
+        y += FONT_ROW_H;
+    }
+    MemUnlock(fontBlock);
+    DrawScrollArrows(gs, total);
+}
+
+/***********************************************************************
+ *              Seite Klang (Sound-Bibliothek)
+ ***********************************************************************/
+
+static void
+KlangButtonRect(word row, word i, Rectangle *r)
+{
+    r->R_left   = (sword) (18 + i * (KL_BTN_W + 8));
+    r->R_top    = (row == 0) ? KL_ROW1_Y : KL_ROW2_Y;
+    r->R_right  = r->R_left + KL_BTN_W;
+    r->R_bottom = r->R_top + KL_BTN_H;
+}
+
+static const char *
+KlangButtonText(word row, word i)
+{
+    if (row == 0) {
+        switch (i) {
+            case 0:  return STR(@StrTonA440);
+            case 1:  return STR(@StrTonleiterCDur);
+            case 2:  return STR(@StrAlleMeineEntchen);
+            default: return STR(@StrAkkordCDur);
+        }
+    }
+    switch (i) {
+        case 0:  return STR(@StrKlavier);
+        case 1:  return STR(@StrOrgel);
+        case 2:  return STR(@StrFloete);
+        default: return STR(@StrXylophon);
+    }
+}
+
+static void
+DrawKlangButton(GStateHandle gs, word row, word i)
+{
+    Rectangle r;
+    Boolean   sel = (row == 1 && i == instrSel);
+
+    KlangButtonRect(row, i, &r);
+    GrSetAreaColor(gs, CF_INDEX, sel ? C_BLUE : C_LIGHT_BLUE, 0, 0);
+    GrFillRoundRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom, 5);
+    GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawRoundRect(gs, r.R_left, r.R_top, r.R_right, r.R_bottom, 5);
+    GrSetTextColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    SetFont(gs, FONT_SCREEN, 10, TRUE);
+    GrDrawText(gs, r.R_left + 8, r.R_top + 6, KlangButtonText(row, i), 0);
+}
+
+static void
+DrawKlangStatus(GStateHandle gs)
+{
+    GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+    GrFillRect(gs, 14, KL_ROW2_Y + KL_BTN_H + 10, PAGE_W - 14, KL_ROW2_Y + KL_BTN_H + 30);
+    if (soundStatus) {
+        GrSetTextColor(gs, CF_INDEX, C_BLUE, 0, 0);
+        SetFont(gs, FONT_SCREEN, 10, TRUE);
+        GrDrawText(gs, 22, KL_ROW2_Y + KL_BTN_H + 12, soundStatus, 0);
+    }
+}
+
+static void
+DrawKlangPage(GStateHandle gs)
+{
+    ReportRow r;
+    word      i;
+    sword     y = ROW_Y;
+
+#define KROW(kind, label, value) \
+    r.RR_kind = kind; \
+    strncpy(r.RR_label, label, LABEL_LEN - 1); r.RR_label[LABEL_LEN - 1] = 0; \
+    strncpy(r.RR_value, value, VALUE_LEN - 1); r.RR_value[VALUE_LEN - 1] = 0; \
+    DrawRow(gs, &r, y); y += ROW_H;
+
+    {
+        char v[VALUE_LEN];
+        KROW(RK_HEAD, STR(@StrKlangSoundBib), "");
+        ReadIni(v, "sound", "synthDriver");
+        KROW(RK_ROW, STR(@StrSynthTreiber), v);
+        ReadIni(v, "sound", "sampleDriver");
+        KROW(RK_ROW, STR(@StrSampleTreiber), v);
+        KROW(RK_ROW, STR(@StrBlasterSB), hw.blaster);
+    }
+#undef KROW
+    SetFont(gs, FONT_SCREEN, 9, FALSE);
+    GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawText(gs, 24, y + 4, STR(@StrKlangHinweis), 0);
+
+    GTitle(gs, 18, KL_ROW1_Y - 22, STR(@StrAbspielen));
+    for (i = 0; i < 4; i++) DrawKlangButton(gs, 0, i);
+    GTitle(gs, 18, KL_ROW2_Y - 22, STR(@StrInstrument));
+    for (i = 0; i < 4; i++) DrawKlangButton(gs, 1, i);
+    DrawKlangStatus(gs);
+}
+
+/* Musik aus songBuf (Ereignisliste der Sound-Bibliothek) */
+static word songLen;
+#define SB(w)  { if (songLen < SONG_MAX) songBuf[songLen++] = (word) (w); }
+
+static void
+StopMusic(void)
+{
+    if (musicHandle) {
+        SoundStopMusic(musicHandle);
+        SoundFreeMusic(musicHandle);
+        musicHandle = NullHandle;
+    }
+}
+
+static void
+SongNote(word voice, word freq, word ms)
+{
+    SB(SSE_VOICE_ON); SB(voice); SB(freq); SB(DYNAMIC_MF);
+    SB(SSDTT_MSEC);   SB(ms - ms / 8);
+    SB(SSE_VOICE_OFF); SB(voice);
+    SB(SSDTT_MSEC);   SB(ms / 8);
+}
+
+static void
+PlaySong(word which)
+{
+    static char  stat[80];
+    static const word scale[8] = { LOW_C, LOW_D, LOW_E, LOW_F,
+                                   LOW_G, LOW_A, LOW_B, MIDDLE_C };
+    /* Alle meine Entchen (Volkslied): Note, Laenge in Achteln */
+    static const word duck[] = {
+        LOW_C,2, LOW_D,2, LOW_E,2, LOW_F,2, LOW_G,4, LOW_G,4,
+        LOW_A,2, LOW_A,2, LOW_A,2, LOW_A,2, LOW_G,8,
+        LOW_A,2, LOW_A,2, LOW_A,2, LOW_A,2, LOW_G,8,
+        LOW_F,2, LOW_F,2, LOW_F,2, LOW_F,2, LOW_E,4, LOW_E,4,
+        LOW_D,2, LOW_D,2, LOW_D,2, LOW_D,2, LOW_C,8, 0,0
+    };
+    word voices = (which == 3) ? 3 : 1;
+    word i, err;
+
+    StopMusic();
+    songLen = 0;
+    for (i = 0; i < voices; i++) {
+        SB(SSE_CHANGE); SB(i); SB(instrument); SB(IT_STANDARD_TABLE);
+    }
+    switch (which) {
+    case 0:
+        SongNote(0, LOW_A, 1000);
+        break;
+    case 1:
+        for (i = 0; i < 8; i++) SongNote(0, scale[i], 300);
+        break;
+    case 2:
+        for (i = 0; duck[i]; i += 2) SongNote(0, duck[i], duck[i + 1] * 150);
+        break;
+    default:            /* Akkord C-E-G, drei Stimmen gleichzeitig */
+        SB(SSE_VOICE_ON); SB(0); SB(LOW_C); SB(DYNAMIC_MF);
+        SB(SSE_VOICE_ON); SB(1); SB(LOW_E); SB(DYNAMIC_MF);
+        SB(SSE_VOICE_ON); SB(2); SB(LOW_G); SB(DYNAMIC_MF);
+        SB(SSDTT_MSEC);   SB(1500);
+        SB(SSE_VOICE_OFF); SB(0);
+        SB(SSE_VOICE_OFF); SB(1);
+        SB(SSE_VOICE_OFF); SB(2);
+        break;
+    }
+    SB(SSE_GENERAL); SB(GE_END_OF_SONG);
+
+    err = SoundAllocMusic(songBuf, voices, &musicHandle);
+    if (!err) {
+        err = SoundPlayMusic(musicHandle, SP_STANDARD, 125, 0);
+    }
+    if (err) {
+        if (musicHandle) { SoundFreeMusic(musicHandle); musicHandle = NullHandle; }
+        sprintf(stat, STR(@StrKlangFehler), err);
+    } else {
+        sprintf(stat, STR(@StrSpieltGerade), KlangButtonText(0, which),
+                KlangButtonText(1, instrSel));
+    }
+    soundStatus = stat;
+}
+#undef SB
+
+static const word instrPatches[4] = {
+    IP_ACOUSTIC_GRAND_PIANO, IP_CHURCH_ORGAN, IP_FLUTE, IP_XYLOPHONE
+};
+
+/* Klick auf der Klangseite; TRUE, wenn ein Knopf getroffen wurde */
+static Boolean
+KlangClick(GStateHandle gs, sword x, sword y)
+{
+    Rectangle r;
+    word      row, i;
+
+    for (row = 0; row < 2; row++) {
+        for (i = 0; i < 4; i++) {
+            KlangButtonRect(row, i, &r);
+            if (x >= r.R_left && x <= r.R_right && y >= r.R_top && y <= r.R_bottom) {
+                if (row == 0) {
+                    PlaySong(i);
+                } else {
+                    instrSel = i;
+                    instrument = instrPatches[i];
+                    if (gs) {
+                        word k;
+                        for (k = 0; k < 4; k++) DrawKlangButton(gs, 1, k);
+                    }
+                }
+                if (gs) DrawKlangStatus(gs);
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+#pragma code_seg("InputCode")
+
+/***********************************************************************
+ *              Ganze Seite zeichnen
+ ***********************************************************************/
+
+static void
+UpdateWindowSizes(WindowHandle win)
+{
+    WindowHandle parent;
+    Rectangle    r;
+
+    if (!win) return;
+    WinGetWinScreenBounds(win, &r);
+    winW = r.R_right - r.R_left + 1;
+    winH = r.R_bottom - r.R_top + 1;
+    for (;;) {
+        parent = NullHandle;
+        WinGetInfo(win, WIT_PARENT_WIN, &parent);
+        if (!parent) break;
+        win = parent;
+    }
+    WinGetWinScreenBounds(win, &r);
+    screenW = r.R_right - r.R_left + 1;
+    screenH = r.R_bottom - r.R_top + 1;
+}
+
+/* Skalierung, Dokumentgroesse und Schrift aus der Groesse der Ansicht */
+static Boolean
+ComputeLayout(word vw, word vh)
+{
+    dword sx, sy;
+    word  pw, ph, ow = docW, oh = docH;
+
+    if (!vw || !vh) return FALSE;
+    viewW = vw;
+    viewH = vh;
+    sx = ((dword) vw << 16) / PAGE_W;
+    sy = ((dword) vh << 16) / PAGE_H;
+    gScale = (sx < sy) ? sx : sy;
+    if (gScale < MIN_SCALE) gScale = MIN_SCALE;
+    pw = (word) ((PAGE_W * gScale) >> 16);
+    ph = (word) ((PAGE_H * gScale) >> 16);
+    docW = (vw > pw) ? vw : pw;
+    docH = (vh > ph) ? vh : ph;
+    gOffX = (sword) ((docW - pw) / 2);
+    gOffY = 0;
+    screenFont = (gScale <= ESQUIRE_MAX_SCALE) ? FID_ESQUIRE : FID_DTC_URW_SANS;
+    return (docW != ow || docH != oh);
+}
+
+/* Fenster-/Dokumentkoordinate -> Seitenkoordinate (640 x 460) */
+static void
+ToPage(sword *x, sword *y)
+{
+    *x = (sword) ((((sdword) *x - gOffX) << 16) / (sdword) gScale);
+    *y = (sword) ((((sdword) *y - gOffY) << 16) / (sdword) gScale);
+}
+
+static void
+ApplyPageTransform(GStateHandle gs)
+{
+    GrApplyTranslation(gs, MakeWWFixed(gOffX), MakeWWFixed(gOffY));
+    GrApplyScale(gs, gScale, gScale);
+}
+
+static void
+DrawAll(GStateHandle gs)
+{
+    if (curPage < NUM_REPORT) {
+        BuildReport();
+    }
+    DrawFrame(gs);
+    switch (curPage) {
+        case PG_LEISTUNG: DrawLeistungPage(gs);                 break;
+        case PG_GRAFIK:   DrawGrafikPage(gs);                   break;
+        case PG_EINGABE:  DrawEingabePage(gs);                  break;
+        case PG_SCHRIFTEN: DrawFontsPage(gs);                   break;
+        case PG_KLANG:    DrawKlangPage(gs);                    break;
+        default:          DrawReportPage(gs, curPage, VIS_ROWS); break;
+    }
+}
+
+#pragma code_seg("OutputCode")
+
+/***********************************************************************
+ *              Bericht als Text (Datei, Zwischenablage)
+ ***********************************************************************/
+
+/* baut den Bericht in einen Block; forFile: DOS-Zeilenenden + Spalten */
+static MemHandle
+ReportText(Boolean forFile, word *lenOut)
+{
+    MemHandle mh;
+    char     *p;
+    word      len = 0, i, pg;
+    char      line[160], dt[40];
+    const word size = 16000;
+
+    BuildReport();
+    mh = MemAlloc(size, HF_SWAPABLE, HAF_ZERO_INIT);
+    if (!mh) return NullHandle;
+    p = (char *) MemLock(mh);
+
+#define ADD(s) { word l_ = strlen(s); if (len + l_ < size - 1) { \
+                 memcpy(p + len, s, l_); len += l_; } }
+#define NL     ADD(forFile ? "\r\n" : "\r")
+
+    sprintf(line, STR(@StrFreeGEOSTestSystembericht), DateTimeText(dt));
+    ADD(line); NL; NL;
+    for (pg = 0; pg < NUM_REPORT; pg++) {
+        ADD(tabNames[pg]); NL;
+        for (i = 0; i < numRows; i++) {
+            const ReportRow *r = &rows[i];
+            if (r->RR_page != pg) continue;
+            if (r->RR_kind == RK_HEAD) {
+                sprintf(line, "  %s", r->RR_label);
+            } else if (forFile) {
+                sprintf(line, "    %-30s%s", r->RR_label, r->RR_value);
+            } else {
+                sprintf(line, "    %s\t%s", r->RR_label, r->RR_value);
+            }
+            ADD(line); NL;
+        }
+        NL;
+    }
+#undef ADD
+#undef NL
+    p[len] = 0;
+    if (forFile) {
+        LocalGeosToDos(p, len, '?');
+    }
+    MemUnlock(mh);
+    *lenOut = len;
+    return mh;
+}
+
+/***********************************************************************
+ *              Leistungsmessung (mit Animation im Testfeld)
+ ***********************************************************************/
+
+static word  tTop, tBottom;
+
+static word
+BenchRun(GStateHandle gs, word op)
+{
+    dword start, end, n = 0, ticks;
+    sword x, y;
+    MemHandle mh;
+
+    start = TimerGetCount();
+    while (TimerGetCount() == start) ;
+    start = TimerGetCount();
+    end = start + B_TICKS;
+
+    while (TimerGetCount() < end && n < 0xfff0) {
+        x = (sword) (24 + Rnd(PAGE_W - 48 - 60));
+        y = (sword) (tTop + 4 + Rnd(tBottom - tTop - 40));
+        switch (op) {
+        case 0:
+            GrSetAreaColor(gs, CF_INDEX, Rnd(15) + 1, 0, 0);
+            GrFillRect(gs, x, y, x + 40, y + 24);
+            break;
+        case 1:
+            GrSetTextColor(gs, CF_INDEX, Rnd(15) + 1, 0, 0);
+            GrDrawText(gs, x, y, "FreeGEOS", 0);
+            break;
+        case 2:
+            GrSetAreaColor(gs, CF_INDEX, Rnd(15) + 1, 0, 0);
+            GrFillEllipse(gs, x, y, x + 40, y + 24);
+            break;
+        case 3:
+            GrDrawBitmap(gs, x, y, (const Bitmap *) iconBitmap, NULL);
+            break;
+        case 4:
+            mh = MemAlloc(1024, HF_SWAPABLE, 0);
+            if (mh) MemFree(mh);
+            break;
+        }
+        n++;
+    }
+    ticks = TimerGetCount() - start;
+    if (!ticks) ticks = 1;
+    n = n * 60 / ticks;
+    return (n > 0xffff) ? 0xffff : (word) n;
+}
+
+/* Gleitkomma ueber die Math-Bibliothek (Watcom -fpc: Aufrufe statt FPU-Code) */
+static dword
+BenchFloat(void)
+{
+    dword  start, ticks, n = 0;
+    double x = 1.0, y = 1000.0;
+    word   i;
+
+    start = TimerGetCount();
+    while (TimerGetCount() == start) ;
+    start = TimerGetCount();
+    while (TimerGetCount() - start < B_TICKS) {
+        for (i = 0; i < 20; i++) {
+            x = x * 1.0001 + 0.5;       /* 2 Operationen */
+            y = y / 1.0003;             /* 1 Operation   */
+        }
+        n += 60;
+    }
+    fSink = x + y;
+    ticks = TimerGetCount() - start;
+    if (!ticks) ticks = 1;
+    return n * 60 / ticks;
+}
+
+static void
+BenchFile(void)
+{
+    FileHandle fh;
+    MemHandle  mh;
+    byte      *buf;
+    dword      start, ticks, bytes, size, pos;
+    word       i;
+
+    bFileW = bFileR = 0;
+    mh = MemAlloc(4096, HF_SWAPABLE, HAF_ZERO_INIT);
+    if (!mh) return;
+    buf = (byte *) MemLock(mh);
+    for (i = 0; i < 4096; i++) buf[i] = (byte) i;
+
+    FilePushDir();
+    FileSetStandardPath(SP_STATE);
+    fh = FileCreate("FGTEST.TMP",
+                    FCF_NATIVE | FILE_CREATE_TRUNCATE | FILE_ACCESS_RW | FILE_DENY_RW,
+                    0);
+    if (fh) {
+        bytes = 0;
+        start = TimerGetCount();
+        while (TimerGetCount() - start < B_TICKS && bytes < 512L * 1024) {
+            if (FileWrite(fh, buf, 4096, FALSE) != 4096) break;
+            bytes += 4096;
+        }
+        FileCommit(fh, FALSE);
+        ticks = TimerGetCount() - start;
+        if (!ticks) ticks = 1;
+        bFileW = bytes * 60 / 1024 / ticks;
+
+        /* nur so viel lesen, wie geschrieben wurde - nie ueber das
+         * Dateiende hinaus; Fehler selbst behandeln (noErrorFlag FALSE) */
+        size = bytes;
+        FilePos(fh, 0, FILE_POS_START);
+        pos = 0;
+        bytes = 0;
+        start = TimerGetCount();
+        while (size >= 4096 && TimerGetCount() - start < B_TICKS) {
+            if (pos + 4096 > size) {
+                FilePos(fh, 0, FILE_POS_START);   /* von vorn */
+                pos = 0;
+            }
+            if (FileRead(fh, buf, 4096, FALSE) != 4096) break;
+            pos += 4096;
+            bytes += 4096;
+        }
+        ticks = TimerGetCount() - start;
+        if (!ticks) ticks = 1;
+        bFileR = bytes * 60 / 1024 / ticks;
+        FileClose(fh, FALSE);
+        FileDelete("FGTEST.TMP");
+    }
+    FilePopDir();
+    MemUnlock(mh);
+    MemFree(mh);
+}
+
+/***********************************************************************
+ *              Druck
+ ***********************************************************************/
+
+static Boolean
+ReportProgress(optr pc, word page)
+{
+    return @call pc::MSG_PRINT_CONTROL_REPORT_PROGRESS(PCPT_PAGE, page);
+}
+
+/* Layout fuer den Druck; gs == 0: nur Seiten zaehlen */
+static word
+PrintReport(GStateHandle gs, word totalPages, optr pc)
+{
+    word  pg, i, page = 1;
+    sword y;
+    char  b[60], dt[40];
+
+    DateTimeText(dt);
+
+#define PR_TOP      (PR_MARGIN + 30)
+#define PR_BOTTOM   (PR_H - PR_MARGIN)
+
+#define PR_HEADER() \
+    if (gs) { \
+        GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0); \
+        SetFont(gs, FONT_PRINT, 13, TRUE); \
+        GrDrawText(gs, PR_MARGIN, PR_MARGIN, STR(@StrFreeGEOSTestSystembericht2), 0); \
+        SetFont(gs, FONT_PRINT, 8, FALSE); \
+        GrDrawText(gs, PR_MARGIN + 260, PR_MARGIN + 4, dt, 0); \
+        sprintf(b, STR(@StrSeite), page, totalPages); \
+        GrDrawText(gs, PR_W - PR_MARGIN - 50, PR_MARGIN + 4, b, 0); \
+        GrSetLineColor(gs, CF_INDEX, C_BLACK, 0, 0); \
+        GrDrawHLine(gs, PR_MARGIN, PR_MARGIN + 20, PR_W - PR_MARGIN); \
+    } \
+    y = PR_TOP;
+
+#define PR_NEED(h) \
+    if (y + (h) > PR_BOTTOM) { \
+        if (gs) { \
+            GrNewPage(gs, PEC_FORM_FEED); \
+            if (!ReportProgress(pc, page + 1)) \
+                return 0; \
+        } \
+        page++; \
+        PR_HEADER(); \
+    }
+
+    PR_HEADER();
+    for (pg = 0; pg < NUM_REPORT; pg++) {
+        PR_NEED(36);
+        if (gs) {
+            GrSetTextColor(gs, CF_INDEX, C_BLUE, 0, 0);
+            SetFont(gs, FONT_PRINT, 13, TRUE);
+            GrDrawText(gs, PR_MARGIN, y, tabNames[pg], 0);
+        }
+        y += 18;
+        for (i = 0; i < numRows; i++) {
+            const ReportRow *r = &rows[i];
+            if (r->RR_page != pg) continue;
+            PR_NEED(12);
+            if (gs) {
+                GrSetTextColor(gs, CF_INDEX, C_BLACK, 0, 0);
+                if (r->RR_kind == RK_HEAD) {
+                    SetFont(gs, FONT_PRINT, 10, TRUE);
+                    GrDrawText(gs, PR_MARGIN + 8, y, r->RR_label, 0);
+                } else {
+                    SetFont(gs, FONT_PRINT, 9, FALSE);
+                    GrDrawText(gs, PR_MARGIN + 16, y, r->RR_label, 0);
+                    SetFont(gs, FONT_PRINT, 9, TRUE);
+                    GrDrawText(gs, PR_MARGIN + 160, y, r->RR_value, 0);
+                }
+            }
+            y += 12;
+        }
+        y += 14;
+    }
+#undef PR_HEADER
+#undef PR_NEED
+    return page;
+}
+
+#pragma code_seg("MethodCode")
+
+/***********************************************************************
+ *              Methoden: GTProcessClass
+ ***********************************************************************/
+
+@method GTProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    DisplayScheme ds;
+
+    LocalNumericFormat nf;
+
+    MemLock(OptrToHandle(@StrRechner));     /* Texte fuer die ganze Laufzeit */
+    InitStrings();
+    LocalGetNumericFormat(&nf);              /* Trennzeichen aus den Voreinstellungen */
+    thouSep = (char) nf.thousandsSeparator;
+    decSep  = (char) nf.decimalSeparator;
+    if (!decSep) decSep = ',';
+    @callsuper();
+    @call GTApp::MSG_GEN_APPLICATION_GET_DISPLAY_SCHEME(&ds);
+    displayType = ds.DS_displayType;
+    MakeBitmaps();
+}
+
+@method GTProcessClass, MSG_GEN_PROCESS_CLOSE_APPLICATION
+{
+    MemHandle mh;
+
+    StopMusic();
+    if (fontBlock) {
+        MemFree(fontBlock);
+        fontBlock = NullHandle;
+    }
+    mh = @callsuper();
+    MemUnlock(OptrToHandle(@StrRechner));
+    return mh;
+}
+
+@method GTProcessClass, MSG_PRINT_GET_DOC_NAME
+{
+    @call printCtrlOD::MSG_PRINT_CONTROL_SET_DOC_NAME(STR(@StrFreeGEOSTest));
+}
+
+@method GTProcessClass, MSG_PRINT_START_PRINTING
+{
+    word pages;
+
+    BuildReport();
+    pages = PrintReport(NullHandle, 1, printCtrlOD);
+    @call printCtrlOD::MSG_PRINT_CONTROL_SET_TOTAL_PAGE_RANGE(1, pages);
+    if (PrintReport(gstate, pages, printCtrlOD)) {
+        GrNewPage(gstate, PEC_FORM_FEED);
+        @send printCtrlOD::MSG_PRINT_CONTROL_PRINTING_COMPLETED();
+        @send GTPage::MSG_GT_PAGE_STATUS(STR(@StrBerichtAnDenDrucker));
+    } else {
+        @send printCtrlOD::MSG_PRINT_CONTROL_PRINTING_CANCELLED();
+    }
+}
+
+@method GTProcessClass, MSG_GT_PROCESS_SAVE_REPORT
+{
+    MemHandle  mh;
+    word       len = 0;
+    FileHandle fh;
+    Boolean    ok = FALSE;
+
+    mh = ReportText(TRUE, &len);
+    if (mh) {
+        FilePushDir();
+        FileSetStandardPath(SP_DOCUMENT);
+        fh = FileCreate("FGTEST.TXT",
+                        FCF_NATIVE | FILE_CREATE_TRUNCATE |
+                        FILE_ACCESS_RW | FILE_DENY_RW, 0);
+        if (fh) {
+            ok = (FileWrite(fh, MemLock(mh), len, FALSE) == len);
+            MemUnlock(mh);
+            FileClose(fh, FALSE);
+        }
+        FilePopDir();
+        MemFree(mh);
+    }
+    @send GTPage::MSG_GT_PAGE_STATUS(ok ?
+        STR(@StrBerichtGespeichertDOCUMENTFG) :
+        STR(@StrSpeichernFehlgeschlagenDOCUM));
+}
+
+@method GTProcessClass, MSG_GT_PROCESS_COPY_REPORT
+{
+    MemHandle mh;
+    word      len = 0;
+    optr      textObj;
+
+    mh = ReportText(FALSE, &len);
+    if (!mh) {
+        @send GTPage::MSG_GT_PAGE_STATUS(STR(@StrKopierenFehlgeschlagen));
+        return;
+    }
+    textObj = TextAllocClipboardObject(ClipboardGetClipboardFile(), 0, 0);
+    @call textObj::MSG_VIS_TEXT_REPLACE_ALL_PTR((char *) MemLock(mh), len);
+    MemUnlock(mh);
+    MemFree(mh);
+    TextFinishWithClipboardObject(textObj, TCO_COPY,
+                                  HandleToOptr(GeodeGetProcessHandle()),
+                                  STR(@StrSystembericht));
+    @send GTPage::MSG_GT_PAGE_STATUS(
+        STR(@StrBerichtInDieZwischenablage));
+}
+
+/***********************************************************************
+ *              Methoden: GTContentClass
+ ***********************************************************************/
+
+/* Ansicht geoeffnet / Groesse geaendert: neu skalieren; wenn sich die
+ * Dokumentgroesse aendert, Geometrie neu berechnen (Rollbalken) */
+static void
+ViewResized(word w, word h)
+{
+    if (ComputeLayout(w, h)) {
+        @send GTPage::MSG_VIS_MARK_INVALID(VOF_GEOMETRY_INVALID,
+                                          VUM_DELAYED_VIA_APP_QUEUE);
+    }
+    @send GTPage::MSG_VIS_INVALIDATE();
+}
+
+@method GTContentClass, MSG_META_CONTENT_VIEW_WIN_OPENED
+{
+    @callsuper();
+    ViewResized(viewWidth, viewHeight);
+}
+
+@method GTContentClass, MSG_META_CONTENT_VIEW_SIZE_CHANGED
+{
+    @callsuper();
+    ViewResized(viewWidth, viewHeight);
+}
+
+@method GTContentClass, MSG_META_KBD_CHAR
+{
+    /* Alt/Strg-Kombinationen (Menükürzel) und Loslassen an die UI */
+    if ((flags & CF_FIRST_PRESS) && !(flags & CF_RELEASE) &&
+        !((flags >> 8) & (SS_LALT | SS_RALT | SS_LCTRL | SS_RCTRL)) &&
+        !(flags & CF_STATE_KEY)) {
+        @send GTPage::MSG_GT_PAGE_KEY(character, flags);
+        return;
+    }
+    @callsuper();
+}
+
+/***********************************************************************
+ *              Methoden: GTPageClass
+ ***********************************************************************/
+
+/* Direkt zeichnen (ausserhalb von MSG_VIS_DRAW) */
+static GStateHandle
+BeginDirect(optr obj)
+{
+    GStateHandle gs = @call obj::MSG_VIS_VUP_CREATE_GSTATE();
+    if (gs) {
+        ApplyPageTransform(gs);
+    }
+    return gs;
+}
+
+/* Groesse = Fenster bzw. Mindestseite (dann mit Rollbalken) */
+@method GTPageClass, MSG_VIS_RECALC_SIZE
+{
+    return MAKE_SIZE_DWORD(docW, docH);
+}
+
+@method GTPageClass, MSG_VIS_DRAW
+{
+    UpdateWindowSizes(GrGetWinHandle(gstate));
+    GrSaveState(gstate);
+    GrSetAreaColor(gstate, CF_INDEX, C_LIGHT_GRAY, 0, 0);
+    GrFillRect(gstate, 0, 0, (sword) docW, (sword) docH);
+    ApplyPageTransform(gstate);
+    DrawAll(gstate);
+    GrRestoreState(gstate);
+}
+
+@method GTPageClass, MSG_GT_PAGE_SET_PAGE
+{
+    if (page < NUM_TABS) {
+        lastTab = page;
+        @send GTPageList::MSG_GEN_ITEM_GROUP_SET_SINGLE_SELECTION(page, FALSE);
+    }
+    curPage = page;
+    statusMsg = NULL;
+    @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+@method GTPageClass, MSG_GT_PAGE_MENU_PAGE
+{
+    @call self::MSG_GT_PAGE_SET_PAGE(selection);
+}
+
+/* Hilfe-Kontexte je Seite (in der Hilfedatei als Kontext anlegen) */
+static const char * const helpContexts[10] = {
+    "Uebersicht", "System", "Speicher", "Bildschirm", "GEOS",
+    "Leistung", "Grafik", "Eingabe", "Schriften", "Klang"
+};
+
+/* Hilfe-Inhaltsverzeichnis (sonst ueber das ? in der Titelleiste) */
+@method GTPageClass, MSG_GT_PAGE_HELP
+{
+    HelpSendHelpNotification(HT_NORMAL_HELP, "TOC", HELP_FILE);
+}
+
+@method GTPageClass, MSG_GT_PAGE_INFO
+{
+    @send GTAboutDialog::MSG_GEN_INTERACTION_INITIATE();
+}
+
+@method GTPageClass, MSG_GT_PAGE_STATUS
+{
+    statusMsg = msg;
+    @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+@method GTPageClass, MSG_GT_PAGE_MEASURE
+{
+    GStateHandle gs;
+
+    @call self::MSG_GT_PAGE_SET_PAGE(PG_LEISTUNG);
+    statusMsg = STR(@StrMessungLaeuft);
+    @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+
+    MeasureLoops();
+    pself = ObjDerefVis(oself);
+    gs = BeginDirect(oself);
+    if (gs) {
+        BuildReport();
+        TestArea(&tTop, &tBottom);
+        GrSetAreaColor(gs, CF_INDEX, C_WHITE, 0, 0);
+        GrFillRect(gs, 21, tTop + 1, PAGE_W - 21, tBottom - 1);
+        GrSaveState(gs);
+        GrSetClipRect(gs, PCT_REPLACE, 21, tTop + 1, PAGE_W - 21, tBottom - 1);
+        SetFont(gs, FONT_SCREEN, 12, FALSE);
+        DrawButton(gs, STR(@StrMessungLaeuft), TRUE);
+        bRect = BenchRun(gs, 0);
+        bText = BenchRun(gs, 1);
+        bEll  = BenchRun(gs, 2);
+        bBmp  = BenchRun(gs, 3);
+        GrRestoreState(gs);
+        GrDestroyState(gs);
+    }
+    bMem = BenchRun(NullHandle, 4);
+    BenchFile();
+    bFloat = BenchFloat();
+    benchDone = TRUE;
+    statusMsg = STR(@StrMessungFertig);
+    @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+/* Tastatur */
+@method GTPageClass, MSG_GT_PAGE_KEY
+{
+    word lo = character & 0xff;
+    Boolean ctrl = ((character >> 8) == CS_CONTROL);
+    word n;
+
+    if (curPage == PG_EINGABE) {
+        GStateHandle gs;
+        word i;
+        /* jede Taste wird angezeigt (neueste oben) */
+        for (i = (numKeys < MAX_KEYS ? numKeys : MAX_KEYS - 1); i > 0; i--) {
+            keys[i] = keys[i - 1];
+        }
+        keys[0].KE_nr = ++keyNr;
+        keys[0].KE_char = character;
+        keys[0].KE_flags = flags;
+        if (numKeys < MAX_KEYS) numKeys++;
+        gs = BeginDirect(oself);
+        if (gs) {
+            DrawKeys(gs);
+            GrDestroyState(gs);
+        }
+        return;
+    }
+
+    n = PageLines(curPage);
+    if (!ctrl && lo >= '1' && lo <= '9') {
+        @call self::MSG_GT_PAGE_SET_PAGE(lo - '1');
+    } else if (!ctrl && lo == '0') {
+        @call self::MSG_GT_PAGE_SET_PAGE(PG_KLANG);
+    } else if (!ctrl && (lo == 'n' || lo == 'N' || lo == ' ')) {
+        @call self::MSG_GT_PAGE_SET_PAGE(curPage < NUM_TABS ? (curPage + 1) % NUM_TABS
+                                                            : PG_UEBERSICHT);
+    } else if (!ctrl && (lo == 'p' || lo == 'P')) {
+        @call self::MSG_GT_PAGE_SET_PAGE(curPage < NUM_TABS ?
+                                         (curPage + NUM_TABS - 1) % NUM_TABS :
+                                         PG_UEBERSICHT);
+    } else if ((ctrl && lo == VC_UP) || (!ctrl && lo == '-')) {
+        if (scrollPos[curPage] > 0) {
+            scrollPos[curPage]--;
+            @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+        }
+    } else if ((ctrl && lo == VC_DOWN) || (!ctrl && lo == '+')) {
+        if (scrollPos[curPage] + VisRows(curPage) < n) {
+            scrollPos[curPage]++;
+            @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+        }
+    } else if (ctrl && lo == VC_PREVIOUS) {
+        scrollPos[curPage] = scrollPos[curPage] > VisRows(curPage) ?
+                             scrollPos[curPage] - VisRows(curPage) : 0;
+        @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+    } else if (ctrl && lo == VC_NEXT) {
+        if (scrollPos[curPage] + 2 * VisRows(curPage) <= n) {
+            scrollPos[curPage] += VisRows(curPage);
+        } else {
+            scrollPos[curPage] = n > VisRows(curPage) ? n - VisRows(curPage) : 0;
+        }
+        @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+    } else if (!ctrl && (lo == 'm' || lo == 'M')) {
+        @send self::MSG_GT_PAGE_MEASURE();
+    } else if (!ctrl && (lo == 's' || lo == 'S')) {
+        @send process::MSG_GT_PROCESS_SAVE_REPORT();
+    } else if (!ctrl && (lo == 'k' || lo == 'K')) {
+        @send process::MSG_GT_PROCESS_COPY_REPORT();
+    } else if ((!ctrl && (lo == 'h' || lo == 'H' || lo == '?')) ||
+               (ctrl && lo == VC_F1)) {
+        /* Taste H, ? oder F1: Hilfe zur aktuellen Seite */
+        HelpSendHelpNotification(HT_NORMAL_HELP, helpContexts[curPage], HELP_FILE);
+    } else if (!ctrl && (lo == 'i' || lo == 'I')) {
+        @send self::MSG_GT_PAGE_INFO();
+    } else if (ctrl && lo == VC_ESCAPE) {
+        @call self::MSG_GT_PAGE_SET_PAGE(PG_UEBERSICHT);
+    }
+}
+
+/* ---------- Maus: eigene Vis-Klasse mit Mausgriff ---------- */
+
+static Boolean
+InRect(sword x, sword y, sword l, sword t, sword r, sword b)
+{
+    return x >= l && x <= r && y >= t && y <= b;
+}
+
+@method GTPageClass, MSG_META_START_SELECT
+{
+    sword x = xPosition, y = yPosition;
+    word  n;
+
+    ToPage(&x, &y);
+    retVal->flags = MRF_PROCESSED;
+    @send GTView::MSG_META_GRAB_FOCUS_EXCL();
+
+    /* Reiter */
+    if (y >= TAB_Y - 2 && y < BODY_TOP && x >= 8 && x < 8 + NUM_TABS * TAB_W) {
+        @call self::MSG_GT_PAGE_SET_PAGE((x - 8) / TAB_W);
+        return;
+    }
+    /* Rollpfeile */
+    n = PageLines(curPage);
+    if (n > VisRows(curPage) && x >= 608 && x <= 628) {
+        if (y >= ROW_Y && y <= ROW_Y + 14 && scrollPos[curPage] > 0) {
+            scrollPos[curPage] = scrollPos[curPage] > 4 ? scrollPos[curPage] - 4 : 0;
+            @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+            return;
+        }
+        if (y >= BODY_BOTTOM - 18 && y <= BODY_BOTTOM - 4) {
+            scrollPos[curPage] += 4;
+            @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+            return;
+        }
+    }
+    /* Knopf "Jetzt messen" */
+    if (curPage == PG_LEISTUNG &&
+        InRect(x, y, BTN_LEFT, BTN_TOP, BTN_RIGHT, BTN_BOTTOM)) {
+        @send self::MSG_GT_PAGE_MEASURE();
+        return;
+    }
+    if (curPage == PG_KLANG) {
+        GStateHandle gs = BeginDirect(oself);
+        KlangClick(gs, x, y);
+        if (gs) GrDestroyState(gs);
+        return;
+    }
+    if (curPage != PG_EINGABE) {
+        return;
+    }
+
+    /* Eingabeseite */
+    clicks++;
+    clickX = mouseX = x;
+    clickY = mouseY = y;
+    lastBP = inputState;
+    if (InRect(x, y, PAD_LEFT, PAD_TOP, PAD_RIGHT, PAD_BOTTOM) &&
+        numPoints < MAX_POINTS - 2) {
+        points[numPoints].SP_x = STROKE_BREAK;
+        points[numPoints].SP_y = STROKE_BREAK;
+        numPoints++;
+        points[numPoints].SP_x = x;
+        points[numPoints].SP_y = y;
+        numPoints++;
+        pself->GTPI_drawing = TRUE;
+        @call self::MSG_VIS_GRAB_MOUSE();
+        pself = ObjDerefVis(oself);
+    }
+    {
+        GStateHandle gs = BeginDirect(oself);
+        if (gs) {
+            DrawMouseValues(gs);
+            GrDestroyState(gs);
+        }
+    }
+}
+
+/* Mausrad: rollt die Seite; auf der Eingabeseite wird gezaehlt */
+@method GTPageClass, MSG_META_MOUSE_WHEEL_VERTICAL
+{
+    sbyte w = GET_WHEEL_INFO(inputState);
+    word  n, vr;
+
+    retVal->flags = MRF_PROCESSED;
+    wheelCount++;
+    wheelSum += w;
+    if (curPage == PG_EINGABE) {
+        GStateHandle gs = BeginDirect(oself);
+        if (gs) {
+            DrawMouseValues(gs);
+            GrDestroyState(gs);
+        }
+        return;
+    }
+    n = PageLines(curPage);
+    vr = VisRows(curPage);
+    if (w > 0 && scrollPos[curPage] + vr < n) {
+        scrollPos[curPage] += 3;
+        if (scrollPos[curPage] + vr > n) scrollPos[curPage] = n - vr;
+    } else if (w < 0 && scrollPos[curPage] > 0) {
+        scrollPos[curPage] = scrollPos[curPage] > 3 ? scrollPos[curPage] - 3 : 0;
+    } else {
+        return;
+    }
+    @call self::MSG_VIS_REDRAW_ENTIRE_OBJECT();
+}
+
+@method GTPageClass, MSG_META_DRAG_SELECT
+{
+    retVal->flags = MRF_PROCESSED;
+    if (curPage == PG_EINGABE) {
+        drags++;
+    }
+}
+
+@method GTPageClass, MSG_META_PTR
+{
+    GStateHandle gs;
+    sword x = xPosition, y = yPosition;
+    Boolean down;
+
+    ToPage(&x, &y);
+    retVal->flags = MRF_PROCESSED;
+    if (curPage != PG_EINGABE) {
+        return;
+    }
+    mouseX = x;
+    mouseY = y;
+    lastBP = inputState;
+    down = (inputState & BI_B0_DOWN) || ((inputState >> 8) & UIFA_SELECT);
+
+    gs = BeginDirect(oself);
+    if (!gs) return;
+    pself = ObjDerefVis(oself);
+
+    /* Nur zeichnen, solange die linke Taste wirklich gedrueckt ist */
+    if (pself->GTPI_drawing && !down) {
+        pself->GTPI_drawing = FALSE;
+        @call self::MSG_VIS_RELEASE_MOUSE();
+        pself = ObjDerefVis(oself);
+    }
+    if (pself->GTPI_drawing && numPoints > 0 && numPoints < MAX_POINTS) {
+        if (x < PAD_LEFT)   x = PAD_LEFT;
+        if (x > PAD_RIGHT)  x = PAD_RIGHT;
+        if (y < PAD_TOP)    y = PAD_TOP;
+        if (y > PAD_BOTTOM) y = PAD_BOTTOM;
+        GrSetLineColor(gs, CF_INDEX, C_BLUE, 0, 0);
+        GrSetLineWidth(gs, MakeWWFixed(3));
+        GrSetClipRect(gs, PCT_REPLACE, PAD_LEFT, PAD_TOP, PAD_RIGHT, PAD_BOTTOM);
+        GrDrawLine(gs, points[numPoints - 1].SP_x, points[numPoints - 1].SP_y, x, y);
+        GrSetClipRect(gs, PCT_NULL, 0, 0, 0, 0);
+        GrSetLineWidth(gs, MakeWWFixed(1));
+        points[numPoints].SP_x = x;
+        points[numPoints].SP_y = y;
+        numPoints++;
+    }
+    DrawMouseValues(gs);
+    GrDestroyState(gs);
+}
+
+@method GTPageClass, MSG_META_END_SELECT
+{
+    retVal->flags = MRF_PROCESSED;
+    if (curPage == PG_EINGABE) {
+        ends++;
+        lastBP = inputState;
+    }
+    if (pself->GTPI_drawing) {
+        pself->GTPI_drawing = FALSE;
+        @call self::MSG_VIS_RELEASE_MOUSE();
+        pself = ObjDerefVis(oself);
+    }
+    if (curPage == PG_EINGABE) {
+        GStateHandle gs = BeginDirect(oself);
+        if (gs) {
+            DrawMouseValues(gs);
+            GrDestroyState(gs);
+        }
+    }
+}
