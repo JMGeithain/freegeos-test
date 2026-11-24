@@ -92,7 +92,7 @@
 
 /* Seite Schriften */
 #define FONT_ROW_H      22
-#define FONT_LIST_Y     (ROW_Y + 22)
+#define FONT_LIST_Y     (ROW_Y + 38)    /* unter Titel und Spaltenkoepfen */
 #define FONT_VIS_ROWS   ((BODY_BOTTOM - 6 - FONT_LIST_Y) / FONT_ROW_H)
 #define MAX_FONT_LIST   200
 #define MAX_FONT_SIZES  8
@@ -643,10 +643,14 @@ static const char *modelNames[8];
 /* --- Seiten Schriften und Klang, Mausrad, Gleitkomma --- */
 @chunk char StrSchriften[] = "Schriften";
 @chunk char StrKlang[] = "Klang";
-@chunk char StrFussSchriften[] = "Pfeiltasten, + / - oder Mausrad rollen · 1–9, 0 Seite";
+@chunk char StrFussSchriften[] = "Pfeiltasten, + / - oder Mausrad rollen · jedes Muster in seiner eigenen Schrift · 1–9, 0 Seite";
 @chunk char StrFussKlang[] = "Knöpfe anklicken: Klang über die Sound-Bibliothek";
 @chunk char StrInstallierteSchriften[] = "Installierte Schriften: %u";
-@chunk char StrSchriftSpalten[] = "Name                                 ID              Art";
+@chunk char StrSpName[] = "Name";
+@chunk char StrSpDatei[] = "Datei";
+@chunk char StrSpID[] = "ID";
+@chunk char StrSpArt[] = "Art und Größen";
+@chunk char StrSpMuster[] = "Muster in der Schrift";
 @chunk char StrSchriftUmriss[] = "Umriss";
 @chunk char StrBitmapSchrift[] = "Bitmap";
 @chunk char StrSchriftMuster[] = "ÄÖÜ äöü ß € 0123";
@@ -2725,8 +2729,18 @@ DrawFontsPage(GStateHandle gs)
     SetFont(gs, FONT_SCREEN, 10, FALSE);
     GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
     GrDrawText(gs, 250, ROW_Y + 2, b, 0);
+    /* Spaltenkoepfe wie in der GeoWorks-1-Fassung */
+    SetFont(gs, FONT_SCREEN, 10, TRUE);
+    GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
+    GrDrawText(gs, 22,  ROW_Y + 19, STR(@StrSpName), 0);
+    GrDrawText(gs, 150, ROW_Y + 19, STR(@StrSpDatei), 0);
+    GrDrawText(gs, 248, ROW_Y + 19, STR(@StrSpID), 0);
+    GrDrawText(gs, 318, ROW_Y + 19, STR(@StrSpArt), 0);
+    GrDrawText(gs, 428, ROW_Y + 19, STR(@StrSpMuster), 0);
     GrSetLineColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
-    GrDrawHLine(gs, 18, ROW_Y + 16, PAGE_W - 30);
+    GrSetLineWidth(gs, MakeWWFixed(2));
+    GrDrawHLine(gs, 18, ROW_Y + 33, PAGE_W - 30);
+    GrSetLineWidth(gs, MakeWWFixed(1));
     if (!total || !fontBlock) {
         SetFont(gs, FONT_SCREEN, 10, FALSE);
         GrSetTextColor(gs, CF_INDEX, C_DARK_GRAY, 0, 0);
